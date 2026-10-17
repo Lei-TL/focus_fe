@@ -39,3 +39,10 @@ Docs: https://docs.expo.dev/eas/index.md
 - If `ios/` and `android/` directories do not exist, they are generated (Continuous Native Generation). Never create or edit them by hand — configure native behavior in `app.json` and config plugins.
 - Expo Go only includes its bundled native modules. After adding a library with native code, the app needs a development build: `npx expo run:ios|android` locally, or `eas build --profile development`.
 - Prefer recommended Expo modules over third-party libraries, and check your available skills before adding dependencies. Docs: https://docs.expo.dev/versions/latest/index.md
+
+## Commit rule (chốt 2026-10-16)
+
+- Khi task xong và đã tự kiểm tra (typecheck, lint đạt) thì commit ngay; không commit khi BLOCKED hoặc đang lỗi. Không push nếu chưa được nói.
+- Chỉ stage đúng file của lượt mình (`git add <path>`, không `git add -A`); không commit `.env`, secret, `node_modules`, `.expo`, `.codex_tmp`, `TASKS/` nếu đang bị exclude.
+- Không để lại dấu vết của ai/agent nào trong commit: không `Co-Authored-By`, không dòng "Generated with", không tên agent/role/model/tool trong message hay trailer. Giữ nguyên `user.name`/`user.email` đã cấu hình.
+- Message ngắn kiểu Conventional Commits (`feat:`, `fix:`, `chore:`), mô tả thay đổi, không nhắc quy trình nội bộ. Quy tắc này thay mọi câu "không tự commit" trong task/report cũ.
