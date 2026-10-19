@@ -49,7 +49,7 @@ const profile: UserProfile = {
   seed: 7,
   defaultSessionMinutes: 50,
   timeZoneId: 'Asia/Ho_Chi_Minh',
-  role: 'Member',
+  role: 'User',
 };
 
 function tokenPair(overrides: Partial<TokenPair> = {}): TokenPair {

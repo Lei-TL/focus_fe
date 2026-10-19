@@ -11,7 +11,7 @@ const profile: UserProfile = {
   seed: 42,
   defaultSessionMinutes: 50,
   timeZoneId: 'Asia/Ho_Chi_Minh',
-  role: 'Member',
+  role: 'User',
 };
 
 const tokenPair: TokenPair = {

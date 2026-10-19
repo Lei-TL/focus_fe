@@ -26,7 +26,7 @@ const profile: UserProfile = {
   seed: 1,
   defaultSessionMinutes: 50,
   timeZoneId: 'Asia/Ho_Chi_Minh',
-  role: 'Member',
+  role: 'User',
 };
 
 let captured: AuthContextValue | null = null;
