@@ -53,3 +53,9 @@ Docs: https://docs.expo.dev/eas/index.md
   - Một commit = một thay đổi logic; không gộp việc không liên quan. Không ghi mã task/milestone (`M3_03`, `INT_T1`), tên role/agent, đường dẫn `TASKS/`, hay số test vào message.
   - Ví dụ đúng: `feat: add session start, events and end endpoints`, `fix: ignore token refresh result after logout`, `chore: add openapi-typescript`. Ví dụ sai: `fix(auth): ...`, `feat(sessions): ...`, `fix: title , paging overflow and acceptance gaps`, `init-project`, `feat: M3 done`.
   - Quy tắc này thay mọi câu "không tự commit" trong task/report cũ.
+
+## Branch rule (chốt 2026-10-16)
+
+- Mỗi module một nhánh `mX/ten-module` (chữ thường, kebab-case), ví dụ `m1/authentication`, `m2/work-items`, `m3/sessions`; cùng mã M và tên với repo BE để ghép cặp.
+- Agent chỉ commit lên nhánh đang checkout; không tự tạo, đổi tên, chuyển nhánh, merge, rebase hay push. Anh tạo nhánh, push và mở PR vào `main`.
+
