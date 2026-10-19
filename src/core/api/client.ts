@@ -53,6 +53,17 @@ export async function refreshTokens(): Promise<TokenPair> {
   }
 
   await tokenStore.setRefreshToken(pair.refreshToken);
+
+  // Re-check after the persist await: a logout/clearAll can run while the
+  // rotated refresh token is being written. If the session changed, the
+  // rotated credential must not survive and the access token must not be
+  // published. The check and the publish below are synchronous, so nothing can
+  // interleave between them.
+  if (tokenStore.getSessionEpoch() !== epoch) {
+    await tokenStore.clearRefreshToken().catch(() => undefined);
+    throw new RefreshFailedError('invalidated', 'Session changed during refresh');
+  }
+
   tokenStore.setAccessToken(pair.accessToken);
   return pair;
 }

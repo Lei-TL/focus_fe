@@ -76,7 +76,6 @@ describe('tokenStore', () => {
       'secure store unavailable'
     );
     expect(secureStore.setItemAsync).toHaveBeenCalledTimes(1);
-    expect(tokenStore.getRefreshToken).toBeDefined();
     expect(secureStore.getItemAsync).not.toHaveBeenCalled();
   });
 });

@@ -142,7 +142,7 @@ describe('auth API', () => {
     ).rejects.toMatchObject({ response: { status: 429 } });
   });
 
-  test('control flow never branches on the response message text', async () => {
+  test('login surfaces the HTTP status even when the body carries a conflicting message', async () => {
     useAdapter((config) => failure(401, { detail: 'Email already exists' }, config));
 
     const error = await login({ email: 'user@example.com', password: 'x' }).catch((e) => e);

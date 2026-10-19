@@ -62,6 +62,20 @@ function authorizationOf(config: InternalAxiosRequestConfig): string {
   return String(headers.Authorization ?? '');
 }
 
+function deferred<T = void>(): {
+  promise: Promise<T>;
+  resolve: (value: T) => void;
+  reject: (reason?: unknown) => void;
+} {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
+}
+
 beforeEach(() => {
   jest.clearAllMocks();
   tokenStore.clearAccessToken();
@@ -182,5 +196,59 @@ describe('apiClient refresh lifecycle', () => {
     expect(secureStore.deleteItemAsync).not.toHaveBeenCalled();
     expect(listener).not.toHaveBeenCalled();
     unsubscribe();
+  });
+
+  test('concurrent401sWhenRefreshDefinitivelyFailsClearAndEmitExactlyOnce', async () => {
+    const listener = jest.fn();
+    const unsubscribe = subscribeExpired(listener);
+    refreshMock.mockRejectedValue(failure(401));
+    secureStore.getItemAsync.mockResolvedValue('refresh-old');
+    secureStore.deleteItemAsync.mockResolvedValue();
+    tokenStore.setAccessToken('access-old');
+    let adapterCalls = 0;
+    apiClient.defaults.adapter = (async (config: InternalAxiosRequestConfig) => {
+      adapterCalls += 1;
+      throw failure(401, config);
+    }) as AxiosAdapter;
+
+    const results = await Promise.allSettled([
+      apiClient.get('/protected'),
+      apiClient.get('/protected'),
+    ]);
+
+    expect(results.every((result) => result.status === 'rejected')).toBe(true);
+    expect(refreshMock).toHaveBeenCalledTimes(1);
+    expect(secureStore.deleteItemAsync).toHaveBeenCalledTimes(1);
+    expect(secureStore.deleteItemAsync).toHaveBeenCalledWith('focus.refreshToken');
+    expect(listener).toHaveBeenCalledTimes(1);
+    expect(tokenStore.getAccessToken()).toBeNull();
+    expect(adapterCalls).toBe(2);
+    unsubscribe();
+  });
+
+  test('logoutDuringRefreshPersistDoesNotPublishAccessToken', async () => {
+    refreshMock.mockResolvedValue(tokenPair());
+    secureStore.getItemAsync.mockResolvedValue('refresh-old');
+    secureStore.deleteItemAsync.mockResolvedValue();
+    const writeStarted = deferred();
+    const writePending = deferred();
+    secureStore.setItemAsync.mockImplementation(() => {
+      writeStarted.resolve();
+      return writePending.promise;
+    });
+    tokenStore.setAccessToken('access-old');
+
+    const refreshPromise = refreshTokens();
+    await writeStarted.promise;
+
+    await tokenStore.clearAll();
+    expect(tokenStore.getAccessToken()).toBeNull();
+
+    writePending.resolve();
+
+    await expect(refreshPromise).rejects.toMatchObject({ kind: 'invalidated' });
+    expect(tokenStore.getAccessToken()).toBeNull();
+    expect(secureStore.setItemAsync).toHaveBeenCalledWith('focus.refreshToken', 'refresh-new');
+    expect(secureStore.deleteItemAsync).toHaveBeenCalledWith('focus.refreshToken');
   });
 });
