@@ -45,11 +45,11 @@ Docs: https://docs.expo.dev/eas/index.md
 - Khi task xong và đã tự kiểm tra (typecheck, lint đạt) thì commit ngay; không commit khi BLOCKED hoặc đang lỗi. Không push nếu chưa được nói.
 - Chỉ stage đúng file của lượt mình (`git add <path>`, không `git add -A`); không commit `.env`, secret, `node_modules`, `.expo`, `.codex_tmp`, `TASKS/` nếu đang bị exclude.
 - Không để lại dấu vết của ai/agent nào trong commit: không `Co-Authored-By`, không dòng "Generated with", không tên agent/role/model/tool trong message hay trailer. Giữ nguyên `user.name`/`user.email` đã cấu hình.
-- **Định dạng message (Conventional Commits, tiếng Anh):** `<type>(<scope>): <subject>`.
+- **Định dạng message (Conventional Commits, tiếng Anh):** `<type>: <subject>`.
   - `type`: `feat` (thêm khả năng mới cho người dùng), `fix` (sửa lỗi hành vi), `refactor` (đổi cấu trúc, không đổi hành vi), `test`, `docs`, `chore` (cấu hình, dependency, tooling), `build`, `ci`, `perf`. Chọn theo tác động thực của commit, không theo tên task.
-  - `scope` ngắn, chữ thường, theo module/khu vực: `auth`, `work-items`, `sessions`, `api`, `deps`, `ui`...; bỏ qua nếu thay đổi chạm nhiều khu vực.
+  - **Không dùng scope và không nhắc tên module** (không `fix(auth):`, không `feat(sessions):`). Chỉ `type: subject`; nếu cần nêu khu vực thì diễn đạt trong subject bằng lời thường, tránh tên module/mã task.
   - `subject`: thể mệnh lệnh, chữ thường, không dấu chấm cuối, không khoảng trắng trước dấu câu, tối đa 72 ký tự, nói **cái gì đổi** chứ không nói "đã sửa/đã thêm". Không dùng từ rỗng ("verified", "final", "update stuff").
   - Body (tùy chọn, cách subject một dòng trống, xuống dòng ~72 cột): giải thích **vì sao** và ràng buộc quan trọng; bắt buộc khi commit đổi hành vi không hiển nhiên hoặc có breaking change (`feat!:` hoặc dòng `BREAKING CHANGE:`).
   - Một commit = một thay đổi logic; không gộp việc không liên quan. Không ghi mã task/milestone (`M3_03`, `INT_T1`), tên role/agent, đường dẫn `TASKS/`, hay số test vào message.
-  - Ví dụ đúng: `feat(sessions): add start, events and end endpoints`, `fix(auth): ignore token refresh result after logout`, `chore(deps): add openapi-typescript`. Ví dụ sai: `fix: title , paging overflow and acceptance gaps`, `init-project`, `feat: M3 done`.
+  - Ví dụ đúng: `feat: add session start, events and end endpoints`, `fix: ignore token refresh result after logout`, `chore: add openapi-typescript`. Ví dụ sai: `fix(auth): ...`, `feat(sessions): ...`, `fix: title , paging overflow and acceptance gaps`, `init-project`, `feat: M3 done`.
   - Quy tắc này thay mọi câu "không tự commit" trong task/report cũ.
