@@ -10,7 +10,7 @@ const REPO_ROOT = path.resolve(SCRIPT_DIR, '..');
 // Focus_Be commit whose committed contract (contracts/openapi.json) these types
 // were generated from and verified against. Update this when the BE contract
 // moves and the generated file is refreshed.
-const BE_CONTRACT_COMMIT = 'cd2bcf7';
+const BE_CONTRACT_COMMIT = '9b6744e';
 
 const DEFAULT_SPEC = path.join(REPO_ROOT, '..', 'Focus_Be', 'contracts', 'openapi.json');
 const OUTPUT_FILE = path.join(REPO_ROOT, 'src', 'core', 'api', 'generated', 'schema.d.ts');

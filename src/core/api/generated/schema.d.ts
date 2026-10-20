@@ -2,7 +2,7 @@
  * GENERATED — không sửa tay; chạy pnpm gen:api
  *
  * Sinh từ OpenAPI của Focus_Be (contracts/openapi.json) bằng openapi-typescript.
- * BE contract commit: cd2bcf7
+ * BE contract commit: 9b6744e
  */
 
 export interface paths {
@@ -91,6 +91,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/sessions/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read a focus session by id */
+        get: operations["WebApisEndpointsSessionModuleDetailDetailSessionEndpoint"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/sessions/{id}/end": {
         parameters: {
             query?: never;
@@ -119,6 +136,23 @@ export interface paths {
         put?: never;
         /** Record a batch of session events */
         post: operations["WebApisEndpointsSessionModuleEventsRecordSessionEventsEndpoint"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/sessions/current": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get the owner's active focus session */
+        get: operations["WebApisEndpointsSessionModuleCurrentCurrentSessionEndpoint"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -254,6 +288,20 @@ export interface components {
             /** Format: int32 */
             userEstimateMinutes?: number | null;
         };
+        CurrentSession: {
+            /** Format: int32 */
+            plannedSeconds: number;
+            /** Format: date-time */
+            serverNow: string;
+            /** Format: date-time */
+            serverStartTime: string;
+            /** Format: guid */
+            sessionId: string;
+            /** @enum {string} */
+            status: "Active" | "Completed" | "Cancelled";
+            /** Format: guid */
+            workItemId: string;
+        };
         DeleteWorkItemRequest: Record<string, never>;
         DependencyDetail: {
             /** Format: guid */
@@ -261,6 +309,7 @@ export interface components {
             /** Format: guid */
             workItemId: string;
         };
+        DetailSessionRequest: Record<string, never>;
         EndedSessionDetail: {
             /** Format: int32 */
             grossSeconds: number;
@@ -359,6 +408,22 @@ export interface components {
             source: "Device" | "VsCode";
             /** @enum {string} */
             type: "Heartbeat" | "Foreground" | "Background" | "Killed";
+        };
+        SessionRead: {
+            /** Format: int32 */
+            grossSeconds: number | null;
+            /** Format: int32 */
+            plannedSeconds: number;
+            /** Format: date-time */
+            serverEndTime: string | null;
+            /** Format: date-time */
+            serverStartTime: string;
+            /** Format: guid */
+            sessionId: string;
+            /** @enum {string} */
+            status: "Active" | "Completed" | "Cancelled";
+            /** Format: guid */
+            workItemId: string;
         };
         StartSessionRequest: {
             /** Format: int32 */
@@ -654,6 +719,51 @@ export interface operations {
             };
         };
     };
+    WebApisEndpointsSessionModuleDetailDetailSessionEndpoint: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SessionRead"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HttpValidationProblemDetails"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
     WebApisEndpointsSessionModuleEndEndSessionEndpoint: {
         parameters: {
             query?: never;
@@ -752,6 +862,40 @@ export interface operations {
             };
             /** @description Session is already closed */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    WebApisEndpointsSessionModuleCurrentCurrentSessionEndpoint: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CurrentSession"];
+                };
+            };
+            /** @description No Content */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Unauthorized */
+            401: {
                 headers: {
                     [name: string]: unknown;
                 };
