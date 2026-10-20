@@ -22,21 +22,33 @@ type RequestBody<O> = O extends { requestBody?: infer RB } ? JsonBody<RB> : neve
 
 type QueryParams<O> = O extends { parameters: { query?: infer Q } } ? Q : never;
 
+type PathParams<P extends string> = P extends `${string}{${infer Param}}${infer Rest}`
+  ? { [K in Param]: string } & PathParams<Rest>
+  : Record<never, never>;
+
 type RequestOptions<M extends ApiMethod, P extends ApiPath> = {
   query?: QueryParams<PathItem<M, P>>;
   body?: RequestBody<PathItem<M, P>>;
+  pathParams?: PathParams<P>;
   signal?: AbortSignal;
 };
+
+function buildPath(path: string, pathParams?: Record<string, string>): string {
+  if (!pathParams) {
+    return path;
+  }
+  return path.replace(/\{([^}]+)\}/g, (match, name: string) => pathParams[name] ?? match);
+}
 
 export async function request<M extends ApiMethod, P extends ApiPath>(
   method: M,
   path: P,
   options: RequestOptions<M, P> = {}
 ): Promise<OkBody<PathItem<M, P>>> {
-  const { query, body, signal } = options;
+  const { query, body, pathParams, signal } = options;
   const response = await apiClient.request<OkBody<PathItem<M, P>>>({
     method,
-    url: path,
+    url: buildPath(path, pathParams),
     params: query,
     data: body,
     signal,

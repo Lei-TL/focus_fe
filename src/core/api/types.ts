@@ -13,6 +13,12 @@ export type WorkItemsPage = components['schemas']['PagedResultOfWorkItemDetail']
 export type CreateWorkItemRequest = components['schemas']['CreateWorkItemRequest'];
 export type UpdateWorkItemRequest = components['schemas']['UpdateWorkItemRequest'];
 export type ChangeStatusRequest = components['schemas']['ChangeStatusRequest'];
+export type AddDependencyRequest = components['schemas']['AddDependencyRequest'];
+export type DependencyDetail = components['schemas']['DependencyDetail'];
+
+export type WorkItemStatus = WorkItemDetail['status'];
+export type WorkItemType = WorkItemDetail['type'];
+export type WorkItemComplexity = WorkItemDetail['complexity'];
 
 export type SessionDetail = components['schemas']['SessionDetail'];
 export type StartSessionRequest = components['schemas']['StartSessionRequest'];
