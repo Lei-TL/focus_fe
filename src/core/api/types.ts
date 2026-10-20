@@ -21,8 +21,13 @@ export type WorkItemType = WorkItemDetail['type'];
 export type WorkItemComplexity = WorkItemDetail['complexity'];
 
 export type SessionDetail = components['schemas']['SessionDetail'];
+export type SessionRead = components['schemas']['SessionRead'];
+export type CurrentSession = components['schemas']['CurrentSession'];
+export type EndedSessionDetail = components['schemas']['EndedSessionDetail'];
 export type StartSessionRequest = components['schemas']['StartSessionRequest'];
 export type EndSessionRequest = components['schemas']['EndSessionRequest'];
+export type SessionStatus = SessionDetail['status'];
+export type EndSessionReason = EndSessionRequest['reason'];
 export type SessionEventInput = components['schemas']['SessionEventInput'];
 export type RecordSessionEventsRequest = components['schemas']['RecordSessionEventsRequest'];
 export type RecordedEvents = components['schemas']['RecordedEvents'];

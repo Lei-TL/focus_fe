@@ -2,6 +2,7 @@ import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 
 import { AuthProvider, useAuth } from '@/context/auth-context';
+import { SessionProvider } from '@/context/session-context';
 import { colors } from '@/theme/tokens';
 
 function RootNavigator() {
@@ -27,8 +28,10 @@ function RootNavigator() {
 export default function RootLayout() {
   return (
     <AuthProvider>
-      <StatusBar style="dark" />
-      <RootNavigator />
+      <SessionProvider>
+        <StatusBar style="dark" />
+        <RootNavigator />
+      </SessionProvider>
     </AuthProvider>
   );
 }

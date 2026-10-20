@@ -21,11 +21,25 @@ import {
 
 const mockBack = jest.fn();
 const mockPush = jest.fn();
+const mockStartSession = jest.fn();
+const mockResumeSession = jest.fn();
 
 jest.mock('expo-router', () => ({
   useLocalSearchParams: () => ({ id: 'w1' }),
   useRouter: () => ({ back: mockBack, push: mockPush }),
   useFocusEffect: jest.fn(),
+}));
+
+jest.mock('@/context/auth-context', () => ({
+  useAuth: () => ({ profile: { defaultSessionMinutes: 50 } }),
+}));
+
+jest.mock('@/context/session-context', () => ({
+  useSession: () => ({
+    start: mockStartSession,
+    resume: mockResumeSession,
+    isStarting: false,
+  }),
 }));
 
 jest.mock('@/hooks/use-work-item-detail', () => ({
@@ -221,5 +235,35 @@ describe('WorkItemDetailScreen', () => {
 
     await waitFor(() => expect(value.refresh).toHaveBeenCalledTimes(1));
     expect(removeDependencyMock).toHaveBeenCalledWith('w1', 'w2');
+  });
+
+  test('only offers starting a session for Open work items', () => {
+    mockDetail();
+    render(<WorkItemDetailScreen />);
+
+    expect(screen.getByTestId('session-start')).toBeTruthy();
+  });
+
+  test('hides the start control for a closed work item', () => {
+    mockDetail(detailWithLinks({ status: 'Done' }));
+    render(<WorkItemDetailScreen />);
+
+    expect(screen.queryByTestId('session-start')).toBeNull();
+  });
+
+  test('starts a session with the chosen duration then opens the focus tab', async () => {
+    mockDetail();
+    mockStartSession.mockResolvedValue({});
+
+    render(<WorkItemDetailScreen />);
+    fireEvent.press(screen.getByTestId('session-duration-25'));
+    fireEvent.press(screen.getByTestId('session-start'));
+
+    await waitFor(() => expect(mockPush).toHaveBeenCalledWith('/focus'));
+    expect(mockStartSession).toHaveBeenCalledWith({
+      workItemId: 'w1',
+      workItemTitle: 'Việc chính',
+      plannedSeconds: 1500,
+    });
   });
 });

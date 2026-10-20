@@ -13,6 +13,7 @@ import {
 } from 'react-native';
 
 import { Card } from '@/components/ui/Card';
+import { StartSessionPanel } from '@/components/sessions/StartSessionPanel';
 import { Chip } from '@/components/work-items/Chip';
 import type { WorkItemDetail, WorkItemStatus } from '@/core/api/types';
 import { useDependencyItems } from '@/hooks/use-dependency-items';
@@ -295,6 +296,17 @@ export default function WorkItemDetailScreen() {
             <ActivityIndicator color={colors.primary} testID="work-item-status-saving" />
           ) : null}
         </Card>
+
+        {detail.status === 'Open' ? (
+          <Card>
+            <Text style={styles.sectionTitle}>Bắt đầu phiên tập trung</Text>
+            <StartSessionPanel
+              workItemId={detail.id}
+              workItemTitle={detail.title}
+              onStarted={() => router.push('/focus')}
+            />
+          </Card>
+        ) : null}
 
         <Card>
           <View style={styles.sectionHeader}>
