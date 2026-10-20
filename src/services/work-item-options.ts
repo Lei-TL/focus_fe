@@ -1,44 +1,50 @@
 import type { WorkItemComplexity, WorkItemStatus, WorkItemType } from '@/core/api/types';
 
-type Option<T extends string> = { value: T; label: string };
+export const WORK_ITEM_TYPE_LABELS: Record<WorkItemType, string> = {
+  Analysis: 'Phân tích',
+  Design: 'Thiết kế',
+  Coding: 'Lập trình',
+  Testing: 'Kiểm thử',
+  Debugging: 'Gỡ lỗi',
+  CodeReview: 'Review mã',
+  Refactor: 'Tái cấu trúc',
+  Documentation: 'Tài liệu',
+  Learning: 'Học tập',
+};
 
-export const workItemTypeOptions = [
-  { value: 'Analysis', label: 'Phân tích' },
-  { value: 'Design', label: 'Thiết kế' },
-  { value: 'Coding', label: 'Lập trình' },
-  { value: 'Testing', label: 'Kiểm thử' },
-  { value: 'Debugging', label: 'Gỡ lỗi' },
-  { value: 'CodeReview', label: 'Review mã' },
-  { value: 'Refactor', label: 'Tái cấu trúc' },
-  { value: 'Documentation', label: 'Tài liệu' },
-  { value: 'Learning', label: 'Học tập' },
-] as const satisfies readonly Option<WorkItemType>[];
+export const WORK_ITEM_STATUS_LABELS: Record<WorkItemStatus, string> = {
+  Open: 'Đang mở',
+  Done: 'Đã xong',
+  Archived: 'Đã lưu trữ',
+};
 
-export const workItemStatusOptions = [
-  { value: 'Open', label: 'Đang mở' },
-  { value: 'Done', label: 'Đã xong' },
-  { value: 'Archived', label: 'Đã lưu trữ' },
-] as const satisfies readonly Option<WorkItemStatus>[];
+export const WORK_ITEM_COMPLEXITY_LABELS: Record<WorkItemComplexity, string> = {
+  S: 'S',
+  M: 'M',
+  L: 'L',
+  XL: 'XL',
+};
 
-export const workItemComplexityOptions = [
-  { value: 'S', label: 'S' },
-  { value: 'M', label: 'M' },
-  { value: 'L', label: 'L' },
-  { value: 'XL', label: 'XL' },
-] as const satisfies readonly Option<WorkItemComplexity>[];
+function toOptions<T extends string>(labels: Record<T, string>): { value: T; label: string }[] {
+  return (Object.keys(labels) as T[]).map((value) => ({ value, label: labels[value] }));
+}
+
+export const workItemTypeOptions = toOptions(WORK_ITEM_TYPE_LABELS);
+export const workItemStatusOptions = toOptions(WORK_ITEM_STATUS_LABELS);
+export const workItemComplexityOptions = toOptions(WORK_ITEM_COMPLEXITY_LABELS);
 
 export function workItemTypeLabel(value: WorkItemType): string {
-  return workItemTypeOptions.find((option) => option.value === value)?.label ?? value;
+  return WORK_ITEM_TYPE_LABELS[value] ?? value;
 }
 
 export function workItemStatusLabel(value: WorkItemStatus): string {
-  return workItemStatusOptions.find((option) => option.value === value)?.label ?? value;
+  return WORK_ITEM_STATUS_LABELS[value] ?? value;
 }
 
 export function isWorkItemType(value: string): value is WorkItemType {
-  return workItemTypeOptions.some((option) => option.value === value);
+  return Object.prototype.hasOwnProperty.call(WORK_ITEM_TYPE_LABELS, value);
 }
 
 export function isWorkItemComplexity(value: string): value is WorkItemComplexity {
-  return workItemComplexityOptions.some((option) => option.value === value);
+  return Object.prototype.hasOwnProperty.call(WORK_ITEM_COMPLEXITY_LABELS, value);
 }

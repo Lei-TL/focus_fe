@@ -10,16 +10,27 @@ export const WORK_ITEM_TITLE_MAX_LENGTH = 200;
 export const WORK_ITEM_DESCRIPTION_MAX_LENGTH = 5000;
 const INT32_MAX = 2_147_483_647;
 
+export type WorkItemFormMode = 'create' | 'update';
+
 export type WorkItemFormValues = {
   title: string;
   description: string;
   type: WorkItemType;
   complexity: WorkItemComplexity;
   deadline: string;
+  deadlineOriginal: string | null;
   userEstimateMinutes: string;
 };
 
-export type WorkItemFormErrors = Partial<Record<keyof WorkItemFormValues, string>>;
+export type WorkItemFormField =
+  | 'title'
+  | 'description'
+  | 'type'
+  | 'complexity'
+  | 'deadline'
+  | 'userEstimateMinutes';
+
+export type WorkItemFormErrors = Partial<Record<WorkItemFormField, string>>;
 
 export type WorkItemFormValidation =
   | { request: CreateWorkItemRequest; errors: WorkItemFormErrors }
@@ -104,6 +115,7 @@ export function emptyWorkItemFormValues(): WorkItemFormValues {
     type: 'Coding',
     complexity: 'M',
     deadline: '',
+    deadlineOriginal: null,
     userEstimateMinutes: '',
   };
 }
@@ -115,6 +127,7 @@ export function workItemFormValuesFromDetail(item: WorkItemDetail): WorkItemForm
     type: item.type,
     complexity: item.complexity,
     deadline: deadlineInputFromIso(item.deadline),
+    deadlineOriginal: item.deadline,
     userEstimateMinutes:
       item.userEstimateMinutes === null ? '' : String(item.userEstimateMinutes),
   };
@@ -133,7 +146,10 @@ export function deadlineInputFromIso(iso: string | null): string {
   )}:${pad(date.getMinutes())}`;
 }
 
-export function validateWorkItemForm(values: WorkItemFormValues): WorkItemFormValidation {
+export function validateWorkItemForm(
+  values: WorkItemFormValues,
+  mode: WorkItemFormMode = 'create'
+): WorkItemFormValidation {
   const errors: WorkItemFormErrors = {};
   const title = values.title.trim();
 
@@ -157,8 +173,21 @@ export function validateWorkItemForm(values: WorkItemFormValues): WorkItemFormVa
   }
 
   const deadline = normalizeDeadline(values.deadline);
-  if (deadline.error) {
+  let deadlineValue = deadline.value;
+  const deadlineUnchanged =
+    values.deadlineOriginal !== null &&
+    values.deadline.trim() === deadlineInputFromIso(values.deadlineOriginal);
+
+  if (deadlineUnchanged) {
+    deadlineValue = values.deadlineOriginal;
+  } else if (deadline.error) {
     errors.deadline = deadline.error;
+  } else if (
+    mode === 'create' &&
+    deadlineValue !== null &&
+    Date.parse(deadlineValue) <= Date.now()
+  ) {
+    errors.deadline = 'Hạn chót phải sau thời điểm hiện tại.';
   }
 
   let userEstimateMinutes: number | null = null;
@@ -186,7 +215,7 @@ export function validateWorkItemForm(values: WorkItemFormValues): WorkItemFormVa
       description: description || null,
       type: values.type,
       complexity: values.complexity,
-      deadline: deadline.value,
+      deadline: deadlineValue,
       userEstimateMinutes,
     },
     errors,

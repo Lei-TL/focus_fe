@@ -32,22 +32,27 @@ export type WorkItemError = {
   fieldErrors: WorkItemFormErrors;
 };
 
-const KNOWN_FIELDS = new Set<keyof WorkItemFormErrors>([
-  'title',
-  'description',
-  'type',
-  'complexity',
-  'deadline',
-  'userEstimateMinutes',
-]);
+const KNOWN_FIELDS: Record<string, keyof WorkItemFormErrors> = {
+  title: 'title',
+  description: 'description',
+  type: 'type',
+  complexity: 'complexity',
+  deadline: 'deadline',
+  userestimateminutes: 'userEstimateMinutes',
+};
+
+export class WorkItemClientError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'WorkItemClientError';
+  }
+}
 
 function normalizeFieldKey(key: string): keyof WorkItemFormErrors | null {
   const segment = key.split('.').pop() ?? key;
   const withoutIndex = segment.replace(/\[\d+\]/g, '');
-  const normalized = withoutIndex.charAt(0).toLowerCase() + withoutIndex.slice(1);
-  return KNOWN_FIELDS.has(normalized as keyof WorkItemFormErrors)
-    ? (normalized as keyof WorkItemFormErrors)
-    : null;
+  const normalized = withoutIndex.toLowerCase();
+  return KNOWN_FIELDS[normalized] ?? null;
 }
 
 function readValidationErrors(data: unknown): WorkItemFormErrors {
@@ -87,6 +92,14 @@ export function isAbortedRequest(error: unknown): boolean {
 }
 
 export function toWorkItemError(error: unknown, action: WorkItemAction): WorkItemError {
+  if (error instanceof WorkItemClientError) {
+    return {
+      code: 'unknown',
+      message: error.message,
+      fieldErrors: {},
+    };
+  }
+
   if (!isAxiosError(error)) {
     return {
       code: 'unknown',

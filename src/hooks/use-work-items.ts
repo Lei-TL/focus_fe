@@ -15,6 +15,7 @@ type LoadedPage = {
   items: WorkItemDetail[];
   totalCount: number;
   page: number;
+  exhausted: boolean;
 };
 
 type ErrorState = {
@@ -36,13 +37,24 @@ export function useWorkItems() {
     items: [],
     totalCount: 0,
     page: 0,
+    exhausted: false,
   });
   const [errorState, setErrorState] = useState<ErrorState | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
 
   const controllerRef = useRef<AbortController | null>(null);
+  const mountedRef = useRef(true);
+  const loadingMoreRef = useRef(false);
   const key = filtersKey(filters);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      controllerRef.current?.abort();
+    };
+  }, []);
 
   useEffect(() => {
     controllerRef.current?.abort();
@@ -61,6 +73,7 @@ export function useWorkItems() {
           items: result.items,
           totalCount: result.totalCount,
           page: result.page,
+          exhausted: false,
         });
         setErrorState(null);
       })
@@ -71,7 +84,7 @@ export function useWorkItems() {
         setState((current) =>
           current.key === key && current.token === token
             ? current
-            : { key, token, items: [], totalCount: 0, page: 0 }
+            : { key, token, items: [], totalCount: 0, page: 0, exhausted: false }
         );
         setErrorState({ key, token, message: toWorkItemError(loadError, 'list').message });
       });
@@ -86,29 +99,42 @@ export function useWorkItems() {
     setToken((current) => current + 1);
   }, []);
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async (): Promise<boolean> => {
     controllerRef.current?.abort();
     const controller = new AbortController();
     controllerRef.current = controller;
-    setRefreshing(true);
+    if (mountedRef.current) {
+      setRefreshing(true);
+    }
     try {
       const result = await fetchWorkItemsPage(1, filters, controller.signal);
-      if (!controller.signal.aborted) {
-        setState({
-          key,
-          token,
-          items: result.items,
-          totalCount: result.totalCount,
-          page: result.page,
-        });
-        setErrorState(null);
+      if (controller.signal.aborted || !mountedRef.current) {
+        return false;
       }
+      setState({
+        key,
+        token,
+        items: result.items,
+        totalCount: result.totalCount,
+        page: result.page,
+        exhausted: false,
+      });
+      setErrorState(null);
+      return true;
     } catch (refreshError) {
-      if (!controller.signal.aborted && !isAbortedRequest(refreshError)) {
-        setErrorState({ key, token, message: toWorkItemError(refreshError, 'list').message });
+      if (
+        controller.signal.aborted ||
+        isAbortedRequest(refreshError) ||
+        !mountedRef.current
+      ) {
+        return false;
       }
+      setErrorState({ key, token, message: toWorkItemError(refreshError, 'list').message });
+      return false;
     } finally {
-      setRefreshing(false);
+      if (mountedRef.current) {
+        setRefreshing(false);
+      }
     }
   }, [filters, key, token]);
 
@@ -121,45 +147,63 @@ export function useWorkItems() {
   const items = loaded ? state.items : [];
   const totalCount = loaded ? state.totalCount : 0;
   const page = loaded ? state.page : 0;
-  const hasMore = loaded && page > 0 && items.length < totalCount;
+  const exhausted = loaded ? state.exhausted : false;
+  const hasMore = loaded && page > 0 && !exhausted && items.length < totalCount;
   const loadMoreDisabled = loading || refreshing || loadingMore || error !== null;
 
   const loadMore = useCallback(async () => {
-    if (!loaded || loadMoreDisabled) {
+    if (!loaded || loadMoreDisabled || loadingMoreRef.current || !hasMore) {
       return;
     }
     if (items.length >= totalCount) {
       return;
     }
 
+    loadingMoreRef.current = true;
     controllerRef.current?.abort();
     const controller = new AbortController();
     controllerRef.current = controller;
-    setLoadingMore(true);
+    if (mountedRef.current) {
+      setLoadingMore(true);
+    }
     try {
       const result = await fetchWorkItemsPage(page + 1, filters, controller.signal);
-      if (!controller.signal.aborted) {
-        setState((current) =>
-          current.key === key && current.token === token
-            ? {
-                ...current,
-                items: mergeWorkItems(current.items, result.items),
-                totalCount: result.totalCount,
-                page: result.page,
-              }
-            : current
-        );
+      if (controller.signal.aborted || !mountedRef.current) {
+        return;
       }
+      setState((current) => {
+        if (current.key !== key || current.token !== token) {
+          return current;
+        }
+        const merged = mergeWorkItems(current.items, result.items);
+        return {
+          ...current,
+          items: merged,
+          totalCount: result.totalCount,
+          page: result.page,
+          exhausted:
+            result.items.length === 0 || merged.length === current.items.length,
+        };
+      });
     } catch (loadError) {
-      if (!controller.signal.aborted && !isAbortedRequest(loadError)) {
-        setErrorState({ key, token, message: toWorkItemError(loadError, 'list').message });
+      if (
+        controller.signal.aborted ||
+        isAbortedRequest(loadError) ||
+        !mountedRef.current
+      ) {
+        return;
       }
+      setErrorState({ key, token, message: toWorkItemError(loadError, 'list').message });
     } finally {
-      setLoadingMore(false);
+      loadingMoreRef.current = false;
+      if (mountedRef.current) {
+        setLoadingMore(false);
+      }
     }
   }, [
     loaded,
     loadMoreDisabled,
+    hasMore,
     items.length,
     totalCount,
     page,

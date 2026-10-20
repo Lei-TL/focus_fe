@@ -51,13 +51,28 @@ export default function WorkItemDetailScreen() {
   const [candidatesError, setCandidatesError] = useState<string | null>(null);
   const [pickerError, setPickerError] = useState<string | null>(null);
   const [dependencySaving, setDependencySaving] = useState<string | null>(null);
+  const [refreshError, setRefreshError] = useState<string | null>(null);
   const candidatesControllerRef = useRef<AbortController | null>(null);
+  const mountedRef = useRef(true);
 
-  useEffect(
-    () => () => {
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
       candidatesControllerRef.current?.abort();
+    };
+  }, []);
+
+  const refreshDetail = useCallback(
+    async (failureMessage: string) => {
+      const ok = await refresh();
+      if (!mountedRef.current) {
+        return ok;
+      }
+      setRefreshError(ok ? null : failureMessage);
+      return ok;
     },
-    []
+    [refresh]
   );
 
   const firstFocusRef = useRef(true);
@@ -67,8 +82,8 @@ export default function WorkItemDetailScreen() {
         firstFocusRef.current = false;
         return;
       }
-      refresh();
-    }, [refresh])
+      void refreshDetail('Không tải lại được công việc. Vui lòng thử lại.');
+    }, [refreshDetail])
   );
 
   const loadCandidates = useCallback(async () => {
@@ -125,7 +140,9 @@ export default function WorkItemDetailScreen() {
     setActionError(null);
     try {
       await removeWorkItemDependency(detail.id, dependsOnWorkItemId);
-      await refresh();
+      await refreshDetail(
+        'Đã xóa phụ thuộc nhưng chưa tải lại được chi tiết. Vui lòng thử lại.'
+      );
     } catch (removeError) {
       setActionError(toWorkItemError(removeError, 'removeDependency').message);
     } finally {
@@ -142,7 +159,9 @@ export default function WorkItemDetailScreen() {
     try {
       await addWorkItemDependency(detail.id, dependsOnWorkItemId);
       setPickerOpen(false);
-      await refresh();
+      await refreshDetail(
+        'Đã thêm phụ thuộc nhưng chưa tải lại được chi tiết. Vui lòng thử lại.'
+      );
     } catch (addError) {
       setPickerError(toWorkItemError(addError, 'addDependency').message);
     } finally {
@@ -209,6 +228,7 @@ export default function WorkItemDetailScreen() {
   const availableCandidates = (candidates ?? []).filter(
     (item) => item.id !== detail.id && !dependencyIds.includes(item.id)
   );
+  const detailBannerError = refreshError ?? error?.message ?? null;
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -323,6 +343,22 @@ export default function WorkItemDetailScreen() {
           </Text>
         ) : null}
 
+        {detailBannerError ? (
+          <View style={styles.errorBanner}>
+            <Text style={styles.error} testID="work-item-detail-refresh-error">
+              {detailBannerError}
+            </Text>
+            <Pressable
+              onPress={() =>
+                void refreshDetail('Không tải lại được công việc. Vui lòng thử lại.')
+              }
+              testID="work-item-detail-refresh-retry"
+            >
+              <Text style={styles.linkText}>Thử lại</Text>
+            </Pressable>
+          </View>
+        ) : null}
+
         <Card>
           <Text style={styles.sectionTitle}>Xóa công việc</Text>
           <Text style={styles.mutedText}>
@@ -432,6 +468,12 @@ const styles = StyleSheet.create({
   dangerLink: { color: colors.danger, fontWeight: '700' },
   mutedText: { color: colors.muted },
   error: { color: colors.danger, fontWeight: '600' },
+  errorBanner: {
+    gap: spacing.xs,
+    padding: spacing.md,
+    borderRadius: radius.md,
+    backgroundColor: colors.primarySoft,
+  },
   linkText: { color: colors.primary, fontWeight: '800' },
   primaryButton: {
     paddingHorizontal: spacing.md,

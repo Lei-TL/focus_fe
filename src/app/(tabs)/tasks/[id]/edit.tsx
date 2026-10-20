@@ -76,6 +76,7 @@ export default function EditWorkItemScreen() {
     <WorkItemForm
       key={detail.id}
       initialValues={workItemFormValuesFromDetail(detail)}
+      mode="update"
       submitLabel="Lưu thay đổi"
       submitting={submitting}
       serverError={submitError}

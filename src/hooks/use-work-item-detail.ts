@@ -18,6 +18,15 @@ export function useWorkItemDetail(id: string | undefined) {
   });
   const [errorState, setErrorState] = useState<{ id: string; error: WorkItemError } | null>(null);
   const controllerRef = useRef<AbortController | null>(null);
+  const mountedRef = useRef(true);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      controllerRef.current?.abort();
+    };
+  }, []);
 
   useEffect(() => {
     if (!id) {
@@ -50,24 +59,32 @@ export function useWorkItemDetail(id: string | undefined) {
     };
   }, [id]);
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async (): Promise<boolean> => {
     if (!id) {
-      return;
+      return false;
     }
     controllerRef.current?.abort();
     const controller = new AbortController();
     controllerRef.current = controller;
     try {
       const result = await getWorkItemDetail(id, controller.signal);
-      if (!controller.signal.aborted) {
-        setState({ id, detail: result, loading: false });
-        setErrorState(null);
+      if (controller.signal.aborted || !mountedRef.current) {
+        return false;
       }
+      setState({ id, detail: result, loading: false });
+      setErrorState(null);
+      return true;
     } catch (refreshError) {
-      if (!controller.signal.aborted && !isAbortedRequest(refreshError)) {
-        setState((current) => (current.id === id ? { ...current, loading: false } : current));
-        setErrorState({ id, error: toWorkItemError(refreshError, 'detail') });
+      if (
+        controller.signal.aborted ||
+        isAbortedRequest(refreshError) ||
+        !mountedRef.current
+      ) {
+        return false;
       }
+      setState((current) => (current.id === id ? { ...current, loading: false } : current));
+      setErrorState({ id, error: toWorkItemError(refreshError, 'detail') });
+      return false;
     }
   }, [id]);
 

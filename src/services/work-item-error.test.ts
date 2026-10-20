@@ -37,6 +37,23 @@ describe('toWorkItemError', () => {
     expect(error.message).toMatch(/đánh dấu/);
   });
 
+  test('maps uppercase field keys case-insensitively', () => {
+    const error = toWorkItemError(
+      httpError(400, {
+        errors: {
+          TITLE: ['Tiêu đề là bắt buộc.'],
+          USERESTIMATEMINUTES: ['Ước lượng phải lớn hơn 0.'],
+        },
+      }),
+      'update'
+    );
+
+    expect(error.fieldErrors).toEqual({
+      title: 'Tiêu đề là bắt buộc.',
+      userEstimateMinutes: 'Ước lượng phải lớn hơn 0.',
+    });
+  });
+
   test('maps 400 without field errors to a generic validation message', () => {
     const error = toWorkItemError(httpError(400, { error: 'bad request' }), 'update');
 

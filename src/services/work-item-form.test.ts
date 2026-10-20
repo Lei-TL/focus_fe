@@ -7,6 +7,9 @@ import {
   workItemFormValuesFromDetail,
 } from '@/services/work-item-form';
 import {
+  WORK_ITEM_COMPLEXITY_LABELS,
+  WORK_ITEM_STATUS_LABELS,
+  WORK_ITEM_TYPE_LABELS,
   workItemComplexityOptions,
   workItemStatusLabel,
   workItemStatusOptions,
@@ -56,6 +59,18 @@ describe('work item enums', () => {
     expect(workItemTypeLabel('CodeReview')).toBe('Review mã');
     expect(workItemStatusLabel('Done')).toBe('Đã xong');
   });
+
+  test('label records cover every generated enum value', () => {
+    expect(Object.keys(WORK_ITEM_TYPE_LABELS).sort()).toEqual(
+      workItemTypeOptions.map((option) => option.value).sort()
+    );
+    expect(Object.keys(WORK_ITEM_STATUS_LABELS).sort()).toEqual(
+      workItemStatusOptions.map((option) => option.value).sort()
+    );
+    expect(Object.keys(WORK_ITEM_COMPLEXITY_LABELS).sort()).toEqual(
+      workItemComplexityOptions.map((option) => option.value).sort()
+    );
+  });
 });
 
 describe('validateWorkItemForm', () => {
@@ -102,6 +117,26 @@ describe('validateWorkItemForm', () => {
 
     expect(result.errors.deadline).toMatch(/ISO 8601/);
     expect(result.request).toBeNull();
+  });
+
+  test('rejects a past deadline when creating', () => {
+    const result = validateWorkItemForm(
+      { ...emptyWorkItemFormValues(), title: 'Việc', deadline: '2020-01-01T10:00' },
+      'create'
+    );
+
+    expect(result.errors.deadline).toMatch(/sau thời điểm hiện tại/);
+    expect(result.request).toBeNull();
+  });
+
+  test('allows a past deadline when updating', () => {
+    const result = validateWorkItemForm(
+      { ...emptyWorkItemFormValues(), title: 'Việc', deadline: '2020-01-01T10:00' },
+      'update'
+    );
+
+    expect(result.errors.deadline).toBeUndefined();
+    expect(result.request?.deadline).toBe(new Date(2020, 0, 1, 10, 0, 0, 0).toISOString());
   });
 
   test('builds a full write request with trimmed values and null optional fields', () => {
@@ -169,7 +204,18 @@ describe('deadline conversion', () => {
       type: 'Coding',
       complexity: 'M',
       deadline: '2026-12-01T09:15',
+      deadlineOriginal: new Date(2026, 11, 1, 9, 15, 0, 0).toISOString(),
       userEstimateMinutes: '45',
     });
+  });
+
+  test('keeps the original ISO deadline when the user does not edit it', () => {
+    const original = '2026-12-01T02:15:45.1234567+00:00';
+    const values = workItemFormValuesFromDetail(detail({ deadline: original }));
+
+    const result = validateWorkItemForm(values, 'update');
+
+    expect(result.errors.deadline).toBeUndefined();
+    expect(result.request?.deadline).toBe(original);
   });
 });

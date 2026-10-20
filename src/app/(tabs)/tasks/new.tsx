@@ -38,6 +38,7 @@ export default function NewWorkItemScreen() {
   return (
     <WorkItemForm
       initialValues={emptyWorkItemFormValues()}
+      mode="create"
       submitLabel="Tạo công việc"
       submitting={submitting}
       serverError={error}

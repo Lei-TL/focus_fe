@@ -4,10 +4,12 @@ import { apiClient } from '@/core/api/client';
 import {
   addWorkItemDependency,
   changeWorkItemStatus,
+  createWorkItem,
   deleteWorkItem,
   getWorkItem,
   listWorkItems,
   removeWorkItemDependency,
+  updateWorkItem,
 } from '@/core/api/work-items';
 
 type Captured = {
@@ -69,6 +71,48 @@ describe('work item API transport', () => {
     await getWorkItem('abc');
 
     expect(captured[0]).toMatchObject({ method: 'get', url: '/work-items/abc' });
+  });
+
+  test('encodes path parameters before building the URL', async () => {
+    useAdapter(200, { id: 'a/b', dependsOnWorkItemIds: [] });
+
+    await getWorkItem('a/b');
+
+    expect(captured[0]).toMatchObject({ method: 'get', url: '/work-items/a%2Fb' });
+  });
+
+  test('posts a full create request', async () => {
+    useAdapter(201, { id: 'new' });
+    const body = {
+      title: 'Việc mới',
+      description: 'Mô tả',
+      type: 'Coding' as const,
+      complexity: 'L' as const,
+      deadline: '2026-12-01T09:00:00.000Z',
+      userEstimateMinutes: 90,
+    };
+
+    await createWorkItem(body);
+
+    expect(captured[0]).toMatchObject({ method: 'post', url: '/work-items' });
+    expect(bodyOf(captured[0])).toEqual(body);
+  });
+
+  test('puts every writable field when updating', async () => {
+    useAdapter(200, { id: 'abc' });
+    const body = {
+      title: 'Việc sửa',
+      description: null,
+      type: 'Testing' as const,
+      complexity: 'XL' as const,
+      deadline: null,
+      userEstimateMinutes: null,
+    };
+
+    await updateWorkItem('abc', body);
+
+    expect(captured[0]).toMatchObject({ method: 'put', url: '/work-items/abc' });
+    expect(bodyOf(captured[0])).toEqual(body);
   });
 
   test('posts a dependency with an explicit dependsOnWorkItemId body', async () => {

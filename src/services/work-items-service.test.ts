@@ -1,20 +1,36 @@
-import { listWorkItems } from '@/core/api/work-items';
-import type { WorkItemDetail, WorkItemsPage } from '@/core/api/types';
+import { AxiosError } from 'axios';
+
+import { getWorkItem, listWorkItems } from '@/core/api/work-items';
+import type {
+  WorkItemDetail,
+  WorkItemDetailWithLinks,
+  WorkItemsPage,
+} from '@/core/api/types';
 import {
+  DEPENDENCY_DETAIL_BATCH_SIZE,
+  DEPENDENCY_PICKER_MAX_PAGES,
   fetchWorkItemsPage,
+  getDependencyItems,
   loadAllWorkItems,
   mergeWorkItems,
 } from '@/services/work-items-service';
 
 jest.mock('@/core/api/work-items', () => ({
+  getWorkItem: jest.fn(),
   listWorkItems: jest.fn(),
 }));
 
 const listWorkItemsMock = listWorkItems as jest.MockedFunction<typeof listWorkItems>;
+const getWorkItemMock = getWorkItem as jest.MockedFunction<typeof getWorkItem>;
 
 beforeEach(() => {
   listWorkItemsMock.mockReset();
+  getWorkItemMock.mockReset();
 });
+
+function flush(): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, 0));
+}
 
 function item(id: string, overrides: Partial<WorkItemDetail> = {}): WorkItemDetail {
   return {
@@ -95,5 +111,70 @@ describe('loadAllWorkItems', () => {
 
     expect(items).toEqual([]);
     expect(listWorkItemsMock).toHaveBeenCalledTimes(1);
+  });
+
+  test('reports instead of stopping silently when the page limit is reached', async () => {
+    listWorkItemsMock.mockImplementation(async ({ page: pageNumber = 1 }) =>
+      page([item(`w${pageNumber}`)], pageNumber, 10_000)
+    );
+
+    await expect(loadAllWorkItems()).rejects.toThrow(/vượt quá/);
+    expect(listWorkItemsMock).toHaveBeenCalledTimes(DEPENDENCY_PICKER_MAX_PAGES);
+  });
+});
+
+describe('getDependencyItems', () => {
+  test('maps a missing dependency detail to null', async () => {
+    getWorkItemMock
+      .mockResolvedValueOnce(
+        item('a') as unknown as WorkItemDetailWithLinks
+      )
+      .mockRejectedValueOnce(new AxiosError('Not Found'));
+
+    const result = await getDependencyItems(['a', 'b']);
+
+    expect(result).toEqual({ a: expect.objectContaining({ id: 'a' }), b: null });
+  });
+
+  test('rethrows an aborted request', async () => {
+    getWorkItemMock.mockRejectedValue(new AxiosError('canceled', 'ERR_CANCELED'));
+
+    await expect(getDependencyItems(['a'])).rejects.toMatchObject({ code: 'ERR_CANCELED' });
+  });
+
+  test('limits dependency detail requests to a fixed batch size', async () => {
+    let active = 0;
+    let maxActive = 0;
+    const pending: (() => void)[] = [];
+
+    getWorkItemMock.mockImplementation(
+      (id) =>
+        new Promise((resolve) => {
+          active += 1;
+          maxActive = Math.max(maxActive, active);
+          pending.push(() => {
+            active -= 1;
+            resolve(item(id) as unknown as WorkItemDetailWithLinks);
+          });
+        })
+    );
+
+    const ids = Array.from({ length: 12 }, (_, index) => `w${index}`);
+    const loading = getDependencyItems(ids);
+
+    expect(getWorkItemMock).toHaveBeenCalledTimes(DEPENDENCY_DETAIL_BATCH_SIZE);
+    expect(pending).toHaveLength(DEPENDENCY_DETAIL_BATCH_SIZE);
+
+    while (pending.length > 0) {
+      const batch = pending.splice(0, DEPENDENCY_DETAIL_BATCH_SIZE);
+      batch.forEach((resolve) => resolve());
+      await flush();
+    }
+
+    const result = await loading;
+
+    expect(Object.keys(result)).toHaveLength(12);
+    expect(maxActive).toBeLessThanOrEqual(DEPENDENCY_DETAIL_BATCH_SIZE);
+    expect(getWorkItemMock).toHaveBeenCalledTimes(12);
   });
 });

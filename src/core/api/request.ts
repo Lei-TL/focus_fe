@@ -26,24 +26,44 @@ type PathParams<P extends string> = P extends `${string}{${infer Param}}${infer 
   ? { [K in Param]: string } & PathParams<Rest>
   : Record<never, never>;
 
+type HasPathParams<P extends string> = P extends `${string}{${string}}${string}`
+  ? true
+  : false;
+
 type RequestOptions<M extends ApiMethod, P extends ApiPath> = {
   query?: QueryParams<PathItem<M, P>>;
   body?: RequestBody<PathItem<M, P>>;
-  pathParams?: PathParams<P>;
   signal?: AbortSignal;
-};
+} & (HasPathParams<P> extends true
+  ? { pathParams: PathParams<P> }
+  : { pathParams?: undefined });
 
-function buildPath(path: string, pathParams?: Record<string, string>): string {
-  if (!pathParams) {
+export function buildPath(path: string, pathParams?: Record<string, string>): string {
+  if (!path.includes('{')) {
     return path;
   }
-  return path.replace(/\{([^}]+)\}/g, (match, name: string) => pathParams[name] ?? match);
+
+  let missing = false;
+  const resolved = path.replace(/\{([^}]+)\}/g, (match, name: string) => {
+    const value = pathParams?.[name];
+    if (value === undefined) {
+      missing = true;
+      return match;
+    }
+    return encodeURIComponent(value);
+  });
+
+  if (missing || resolved.includes('{')) {
+    throw new Error(`Thiếu path parameter để tạo URL cho "${path}".`);
+  }
+
+  return resolved;
 }
 
 export async function request<M extends ApiMethod, P extends ApiPath>(
   method: M,
   path: P,
-  options: RequestOptions<M, P> = {}
+  options: RequestOptions<M, P>
 ): Promise<OkBody<PathItem<M, P>>> {
   const { query, body, pathParams, signal } = options;
   const response = await apiClient.request<OkBody<PathItem<M, P>>>({

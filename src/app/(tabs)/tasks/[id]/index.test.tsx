@@ -4,7 +4,11 @@ import { AxiosError } from 'axios';
 import { Alert } from 'react-native';
 
 import WorkItemDetailScreen from '@/app/(tabs)/tasks/[id]/index';
-import type { WorkItemDetail, WorkItemDetailWithLinks } from '@/core/api/types';
+import type {
+  DependencyDetail,
+  WorkItemDetail,
+  WorkItemDetailWithLinks,
+} from '@/core/api/types';
 import { useDependencyItems } from '@/hooks/use-dependency-items';
 import { useWorkItemDetail } from '@/hooks/use-work-item-detail';
 import {
@@ -164,6 +168,43 @@ describe('WorkItemDetailScreen', () => {
 
     await waitFor(() =>
       expect(value.applyWorkItem).toHaveBeenCalledWith(expect.objectContaining({ status: 'Done' }))
+    );
+  });
+
+  test('reports a failed refresh after adding a dependency', async () => {
+    const value = mockDetail(detailWithLinks({ dependsOnWorkItemIds: [] }));
+    value.refresh.mockResolvedValue(false);
+    loadAllMock.mockResolvedValue([item(), item({ id: 'w2', title: 'Việc ứng viên' })]);
+    addDependencyMock.mockResolvedValue({
+      workItemId: 'w1',
+      dependsOnWorkItemId: 'w2',
+    } as DependencyDetail);
+
+    render(<WorkItemDetailScreen />);
+    fireEvent.press(screen.getByTestId('work-item-add-dependency'));
+    fireEvent.press(await screen.findByTestId('dependency-candidate-w2'));
+
+    await waitFor(() =>
+      expect(screen.getByTestId('work-item-detail-refresh-error')).toBeTruthy()
+    );
+    expect(screen.getByText(/Đã thêm phụ thuộc nhưng chưa tải lại được/)).toBeTruthy();
+    expect(value.refresh).toHaveBeenCalledTimes(1);
+  });
+
+  test('reports a failed refresh after removing a dependency', async () => {
+    const value = mockDetail(detailWithLinks({ dependsOnWorkItemIds: ['w2'] }));
+    value.refresh.mockResolvedValue(false);
+    useDependencyMock.mockReturnValue({
+      items: { w2: item({ id: 'w2', title: 'Việc phụ thuộc' }) },
+      loading: false,
+    });
+    removeDependencyMock.mockResolvedValue();
+
+    render(<WorkItemDetailScreen />);
+    fireEvent.press(screen.getByTestId('work-item-remove-dependency-w2'));
+
+    await waitFor(() =>
+      expect(screen.getByText(/Đã xóa phụ thuộc nhưng chưa tải lại được/)).toBeTruthy()
     );
   });
 

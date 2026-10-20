@@ -9,10 +9,12 @@ import type {
   WorkItemType,
   WorkItemsPage,
 } from '@/core/api/types';
-import { isAbortedRequest } from '@/services/work-item-error';
+import { WorkItemClientError, isAbortedRequest } from '@/services/work-item-error';
 
 export const WORK_ITEMS_PAGE_SIZE = 20;
 export const DEPENDENCY_PICKER_PAGE_SIZE = 100;
+export const DEPENDENCY_PICKER_MAX_PAGES = 50;
+export const DEPENDENCY_DETAIL_BATCH_SIZE = 5;
 
 export type WorkItemFilters = {
   status: WorkItemStatus | null;
@@ -56,10 +58,9 @@ export async function fetchWorkItemsPage(
 
 export async function loadAllWorkItems(signal?: AbortSignal): Promise<WorkItemDetail[]> {
   let items: WorkItemDetail[] = [];
-  let page = 1;
   let totalCount = 0;
 
-  while (page <= 50) {
+  for (let page = 1; page <= DEPENDENCY_PICKER_MAX_PAGES; page += 1) {
     const result = await workItemsApi.listWorkItems(
       { page, pageSize: DEPENDENCY_PICKER_PAGE_SIZE },
       signal
@@ -67,12 +68,13 @@ export async function loadAllWorkItems(signal?: AbortSignal): Promise<WorkItemDe
     items = mergeWorkItems(items, result.items);
     totalCount = result.totalCount;
     if (result.items.length === 0 || items.length >= totalCount) {
-      break;
+      return items;
     }
-    page += 1;
   }
 
-  return items;
+  throw new WorkItemClientError(
+    `Danh sách công việc vượt quá ${DEPENDENCY_PICKER_MAX_PAGES} trang nên chưa tải hết. Vui lòng thử lại sau.`
+  );
 }
 
 export async function getWorkItemDetail(
@@ -86,19 +88,26 @@ export async function getDependencyItems(
   ids: string[],
   signal?: AbortSignal
 ): Promise<Record<string, WorkItemDetail | null>> {
-  const entries = await Promise.all(
-    ids.map(async (id) => {
-      try {
-        const item = await workItemsApi.getWorkItem(id, signal);
-        return [id, item] as const;
-      } catch (error) {
-        if (isAbortedRequest(error)) {
-          throw error;
+  const entries: (readonly [string, WorkItemDetail | null])[] = [];
+
+  for (let start = 0; start < ids.length; start += DEPENDENCY_DETAIL_BATCH_SIZE) {
+    const batch = ids.slice(start, start + DEPENDENCY_DETAIL_BATCH_SIZE);
+    const batchEntries = await Promise.all(
+      batch.map(async (id) => {
+        try {
+          const item = await workItemsApi.getWorkItem(id, signal);
+          return [id, item] as const;
+        } catch (error) {
+          if (isAbortedRequest(error)) {
+            throw error;
+          }
+          return [id, null] as const;
         }
-        return [id, null] as const;
-      }
-    })
-  );
+      })
+    );
+    entries.push(...batchEntries);
+  }
+
   return Object.fromEntries(entries);
 }
 

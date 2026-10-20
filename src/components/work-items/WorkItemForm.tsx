@@ -18,6 +18,7 @@ import type { CreateWorkItemRequest } from '@/core/api/types';
 import {
   validateWorkItemForm,
   type WorkItemFormErrors,
+  type WorkItemFormMode,
   type WorkItemFormValues,
 } from '@/services/work-item-form';
 import {
@@ -26,8 +27,11 @@ import {
 } from '@/services/work-item-options';
 import { colors, radius, spacing } from '@/theme/tokens';
 
+const EMPTY_FIELD_KEYS = new Set<keyof WorkItemFormErrors>();
+
 type Props = {
   initialValues: WorkItemFormValues;
+  mode: WorkItemFormMode;
   submitLabel: string;
   submitting: boolean;
   serverError?: string | null;
@@ -39,6 +43,7 @@ type Props = {
 
 export function WorkItemForm({
   initialValues,
+  mode,
   submitLabel,
   submitting,
   serverError,
@@ -49,31 +54,57 @@ export function WorkItemForm({
 }: Props) {
   const [values, setValues] = useState(initialValues);
   const [errors, setErrors] = useState<WorkItemFormErrors>({});
+  const [clearedServerFields, setClearedServerFields] = useState<{
+    source: WorkItemFormErrors | undefined;
+    keys: Set<keyof WorkItemFormErrors>;
+  }>({ source: undefined, keys: new Set() });
+
+  const clearedServerKeys =
+    clearedServerFields.source === serverFieldErrors
+      ? clearedServerFields.keys
+      : EMPTY_FIELD_KEYS;
+
+  function clearFieldError(current: WorkItemFormErrors, key: keyof WorkItemFormErrors) {
+    if (!current[key]) {
+      return current;
+    }
+    const next = { ...current };
+    delete next[key];
+    return next;
+  }
 
   function setField<K extends keyof WorkItemFormValues>(
     key: K,
     value: WorkItemFormValues[K]
   ) {
     setValues((current) => ({ ...current, [key]: value }));
-    setErrors((current) => {
-      if (!current[key]) {
-        return current;
-      }
-      const next = { ...current };
-      delete next[key];
-      return next;
+    setErrors((current) => clearFieldError(current, key as keyof WorkItemFormErrors));
+
+    const field = key as keyof WorkItemFormErrors;
+    if (!serverFieldErrors?.[field]) {
+      return;
+    }
+    setClearedServerFields((current) => {
+      const keys = new Set(
+        current.source === serverFieldErrors ? current.keys : EMPTY_FIELD_KEYS
+      );
+      keys.add(field);
+      return { source: serverFieldErrors, keys };
     });
   }
 
-  function errorFor(key: keyof WorkItemFormValues): string | undefined {
-    return errors[key] ?? serverFieldErrors?.[key];
+  function errorFor(key: keyof WorkItemFormErrors): string | undefined {
+    return (
+      errors[key] ??
+      (clearedServerKeys.has(key) ? undefined : serverFieldErrors?.[key])
+    );
   }
 
   function handleSubmit() {
     if (submitting) {
       return;
     }
-    const result = validateWorkItemForm(values);
+    const result = validateWorkItemForm(values, mode);
     setErrors(result.errors);
     if (result.request) {
       onSubmit(result.request);
