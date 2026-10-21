@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { useFocusEffect } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
 import {
   ActivityIndicator,
   Alert,
@@ -17,6 +17,7 @@ import {
   useSession,
   type ActiveFocusSession,
   type SessionContextValue,
+  type SessionRecovery,
 } from '@/context/session-context';
 import { useWorkItems } from '@/hooks/use-work-items';
 import { isSessionError } from '@/services/session-error';
@@ -34,7 +35,8 @@ import { colors, radius, spacing } from '@/theme/tokens';
 const FOCUS_FILTERS: WorkItemFilters = { status: 'Open', type: null };
 
 export default function FocusScreen() {
-  const { state, isEnding, end, dismissResult, events } = useSession();
+  const { state, isEnding, end, dismissResult, events, recovery, checkCurrent } = useSession();
+  const router = useRouter();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [endError, setEndError] = useState<string | null>(null);
   const mountedRef = useRef(true);
@@ -72,10 +74,13 @@ export default function FocusScreen() {
   }, [filters.status, filters.type, setFilters]);
 
   // Work items created or closed on other screens must show up here when the
-  // user comes back to this tab; the tab stays mounted between visits.
+  // user comes back to this tab; the tab stays mounted between visits. The
+  // current session is re-checked on every focus, but the provider coalesces
+  // checks that happen within a few seconds of each other.
   const firstFocusRef = useRef(true);
   useFocusEffect(
     useCallback(() => {
+      void checkCurrent();
       if (firstFocusRef.current) {
         firstFocusRef.current = false;
         return;
@@ -84,7 +89,7 @@ export default function FocusScreen() {
         return;
       }
       void refresh();
-    }, [refresh, state.kind])
+    }, [checkCurrent, refresh, state.kind])
   );
 
   const performEnd = useCallback(
@@ -146,7 +151,24 @@ export default function FocusScreen() {
           <Text style={styles.meta}>
             Đồng hồ bám mốc giờ máy chủ, tự tính lại khi quay lại ứng dụng.
           </Text>
+          <Pressable
+            accessibilityRole="link"
+            onPress={() =>
+              router.push({
+                pathname: '/session/[id]',
+                params: { id: state.session.sessionId },
+              })
+            }
+            testID="session-active-detail"
+          >
+            <Text style={styles.linkText}>Xem chi tiết phiên</Text>
+          </Pressable>
         </Card>
+
+        <RecoveryNotice
+          recovery={recovery}
+          onRetry={() => void checkCurrent({ force: true })}
+        />
 
         <Card>
           <Text style={styles.sectionTitle}>Kết thúc phiên</Text>
@@ -199,7 +221,23 @@ export default function FocusScreen() {
           <Text style={styles.meta}>
             Đây là thời gian thô (grossSeconds) do máy chủ ghi nhận, chưa phải điểm chất lượng.
           </Text>
+          <Pressable
+            accessibilityRole="link"
+            onPress={() =>
+              router.push({
+                pathname: '/session/[id]',
+                params: { id: state.result.sessionId },
+              })
+            }
+            testID="session-result-detail"
+          >
+            <Text style={styles.linkText}>Xem chi tiết phiên</Text>
+          </Pressable>
         </Card>
+        <RecoveryNotice
+          recovery={recovery}
+          onRetry={() => void checkCurrent({ force: true })}
+        />
         <Pressable onPress={restart} style={styles.primaryButton} testID="session-new">
           <Text style={styles.primaryButtonText}>Bắt đầu phiên mới</Text>
         </Pressable>
@@ -230,6 +268,10 @@ export default function FocusScreen() {
 
   return (
     <Screen eyebrow="Phiên tập trung" title="Chọn công việc">
+      <RecoveryNotice
+        recovery={recovery}
+        onRetry={() => void checkCurrent({ force: true })}
+      />
       <Card>
         <View style={styles.sectionHeader}>
           <Text style={styles.sectionTitle}>Công việc đang mở</Text>
@@ -329,7 +371,48 @@ function SessionClock({ session }: { session: ActiveFocusSession }) {
         Đã trôi {formatDuration(timing.elapsedSeconds)} · Dự kiến{' '}
         {formatDuration(timing.totalSeconds)}
       </Text>
+      {timing.isOvertime ? (
+        <Text style={styles.overtime} testID="session-overtime">
+          Đã quá thời gian dự kiến {formatDuration(timing.overtimeSeconds)}. Phiên không tự kết
+          thúc, bạn vẫn có thể kết thúc khi sẵn sàng.
+        </Text>
+      ) : null}
     </>
+  );
+}
+
+// A failed current-session check must never read as "no session": the user is
+// told the check failed and can retry it explicitly.
+function RecoveryNotice({
+  recovery,
+  onRetry,
+}: {
+  recovery: SessionRecovery;
+  onRetry: () => void;
+}) {
+  if (recovery.status !== 'unavailable' && recovery.status !== 'conflict') {
+    return null;
+  }
+  const failed = recovery.status === 'unavailable';
+  return (
+    <Card>
+      <Text style={styles.recoveryTitle} testID="session-recovery-title">
+        {failed ? 'Không kiểm tra được phiên' : 'Phiên chưa đồng bộ'}
+      </Text>
+      <Text style={styles.meta} testID="session-recovery-message">
+        {recovery.message ??
+          (failed
+            ? 'Không kiểm tra được phiên đang chạy.'
+            : 'Máy chủ và ứng dụng đang giữ phiên khác nhau.')}
+      </Text>
+      <Pressable
+        accessibilityRole="button"
+        onPress={onRetry}
+        testID="session-recovery-retry"
+      >
+        <Text style={styles.linkText}>Thử lại</Text>
+      </Pressable>
+    </Card>
   );
 }
 
@@ -381,6 +464,8 @@ const styles = StyleSheet.create({
     marginVertical: spacing.lg,
   },
   meta: { color: colors.muted, textAlign: 'center' },
+  overtime: { color: colors.danger, fontWeight: '700', textAlign: 'center' },
+  recoveryTitle: { color: colors.danger, fontSize: 16, fontWeight: '800' },
   sectionTitle: { color: colors.text, fontSize: 17, fontWeight: '800' },
   sectionHeader: {
     flexDirection: 'row',

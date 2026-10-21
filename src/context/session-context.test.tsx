@@ -10,6 +10,7 @@ import {
 } from '@/context/session-context';
 import { SessionClientError } from '@/services/session-error';
 import * as sessionService from '@/services/session-service';
+import * as workItemsService from '@/services/work-items-service';
 
 let mockAuthStatus: 'signedIn' | 'signedOut' = 'signedIn';
 
@@ -25,11 +26,16 @@ jest.mock('@/services/session-service', () => ({
   recordFocusSessionEvents: jest.fn(),
 }));
 
+jest.mock('@/services/work-items-service', () => ({
+  getWorkItemDetail: jest.fn(),
+}));
+
 const startMock = sessionService.startFocusSession as jest.Mock;
 const endMock = sessionService.endFocusSession as jest.Mock;
 const currentMock = sessionService.getCurrentFocusSession as jest.Mock;
 const detailMock = sessionService.getFocusSession as jest.Mock;
 const recordMock = sessionService.recordFocusSessionEvents as jest.Mock;
+const workItemDetailMock = workItemsService.getWorkItemDetail as jest.Mock;
 
 const started = {
   sessionId: 's1',
@@ -79,6 +85,9 @@ beforeEach(() => {
   jest.clearAllMocks();
   mockAuthStatus = 'signedIn';
   captured = null;
+  // Mounting the provider asks "is there a session?" once; default answer is no.
+  currentMock.mockResolvedValue(null);
+  workItemDetailMock.mockResolvedValue({ id: 'w1', title: 'Việc chính' });
 });
 
 describe('SessionProvider', () => {

@@ -23,6 +23,7 @@ const mockBack = jest.fn();
 const mockPush = jest.fn();
 const mockStartSession = jest.fn();
 const mockResumeSession = jest.fn();
+let mockLatestSessionByWorkItem: Record<string, string> = {};
 
 jest.mock('expo-router', () => ({
   useLocalSearchParams: () => ({ id: 'w1' }),
@@ -39,6 +40,7 @@ jest.mock('@/context/session-context', () => ({
     start: mockStartSession,
     resume: mockResumeSession,
     isStarting: false,
+    latestSessionByWorkItem: mockLatestSessionByWorkItem,
   }),
 }));
 
@@ -120,6 +122,7 @@ function mockDetail(current: WorkItemDetailWithLinks = detailWithLinks()) {
 
 beforeEach(() => {
   jest.clearAllMocks();
+  mockLatestSessionByWorkItem = {};
   useDependencyMock.mockReturnValue({ items: {}, loading: false });
   loadAllMock.mockResolvedValue([]);
 });
@@ -136,6 +139,20 @@ describe('WorkItemDetailScreen', () => {
 
     expect(screen.getByText('Việc phụ thuộc')).toBeTruthy();
     expect(screen.getByText('Mô tả công việc')).toBeTruthy();
+  });
+
+  test('links to the latest session the app knows for this work item', () => {
+    mockDetail();
+    mockLatestSessionByWorkItem = { w1: 's1' };
+
+    render(<WorkItemDetailScreen />);
+
+    fireEvent.press(screen.getByTestId('work-item-latest-session'));
+
+    expect(mockPush).toHaveBeenCalledWith({
+      pathname: '/session/[id]',
+      params: { id: 's1' },
+    });
   });
 
   test('shows the 409 message when deleting a work item that has sessions', async () => {

@@ -9,11 +9,13 @@ import { SessionClientError } from '@/services/session-error';
 
 let mockSession: SessionContextValue;
 let mockFocusCallback: (() => void | (() => void)) | null = null;
+const mockPush = jest.fn();
 
 jest.mock('expo-router', () => ({
   useFocusEffect: (callback: () => void | (() => void)) => {
     mockFocusCallback = callback;
   },
+  useRouter: () => ({ push: mockPush }),
 }));
 
 jest.mock('@/context/session-context', () => ({
@@ -84,9 +86,12 @@ function sessionValue(overrides: Partial<SessionContextValue> = {}): SessionCont
     isStarting: false,
     isEnding: false,
     events: eventsValue(),
+    recovery: { status: 'idle', message: null },
+    latestSessionByWorkItem: {},
     start: jest.fn(),
     end: jest.fn(),
     resume: jest.fn(),
+    checkCurrent: jest.fn(),
     dismissResult: jest.fn(),
     ...overrides,
   };
@@ -372,5 +377,107 @@ describe('FocusScreen', () => {
     } finally {
       jest.useRealTimers();
     }
+  });
+
+  test('flags a session that runs past the planned duration without ending it', () => {
+    const nowSpy = jest
+      .spyOn(Date, 'now')
+      .mockReturnValue(Date.parse('2026-10-20T01:20:00.000Z'));
+    sessionValue({
+      state: {
+        kind: 'active',
+        session: {
+          ...activeSession,
+          plannedSeconds: 900,
+          clockOffsetMs: 0,
+        },
+      },
+    });
+
+    render(<FocusScreen />);
+
+    expect(screen.getByTestId('session-overtime')).toHaveTextContent(/quá thời gian dự kiến/);
+    expect(screen.getByTestId('session-overtime')).toHaveTextContent(/05:00/);
+    expect(screen.getByTestId('session-complete')).toBeTruthy();
+    expect(mockSession.end).not.toHaveBeenCalled();
+    nowSpy.mockRestore();
+  });
+
+  test('re-checks the current session when the tab is focused', () => {
+    const checkCurrent = jest.fn();
+    sessionValue({ checkCurrent });
+
+    render(<FocusScreen />);
+    act(() => {
+      mockFocusCallback?.();
+    });
+
+    expect(checkCurrent).toHaveBeenCalledTimes(1);
+  });
+
+  test('reports a failed current check and retries it on demand', () => {
+    const checkCurrent = jest.fn();
+    sessionValue({
+      recovery: { status: 'unavailable', message: 'Không kiểm tra được phiên đang chạy.' },
+      checkCurrent,
+    });
+
+    render(<FocusScreen />);
+
+    expect(screen.getByTestId('session-recovery-title')).toHaveTextContent(
+      /Không kiểm tra được phiên/
+    );
+    // The failed check must not be presented as "no session".
+    expect(screen.queryByTestId('focus-items-empty')).toBeNull();
+
+    fireEvent.press(screen.getByTestId('session-recovery-retry'));
+    expect(checkCurrent).toHaveBeenCalledWith({ force: true });
+  });
+
+  test('shows the server conflict without replacing the running session', () => {
+    sessionValue({
+      state: { kind: 'active', session: activeSession },
+      recovery: { status: 'conflict', message: 'Máy chủ đang chạy một phiên khác.' },
+    });
+
+    render(<FocusScreen />);
+
+    expect(screen.getByTestId('session-active-title')).toHaveTextContent('Học React Native');
+    expect(screen.getByTestId('session-recovery-title')).toHaveTextContent(/chưa đồng bộ/);
+  });
+
+  test('links the current and finished session to the result route', () => {
+    sessionValue({ state: { kind: 'active', session: activeSession } });
+    const activeView = render(<FocusScreen />);
+
+    fireEvent.press(screen.getByTestId('session-active-detail'));
+    expect(mockPush).toHaveBeenCalledWith({
+      pathname: '/session/[id]',
+      params: { id: 's1' },
+    });
+    activeView.unmount();
+
+    mockPush.mockClear();
+    sessionValue({
+      state: {
+        kind: 'result',
+        result: {
+          sessionId: 's1',
+          workItemId: 'w1',
+          workItemTitle: 'Học React Native',
+          status: 'Completed',
+          grossSeconds: 185,
+          serverStartTime: '2026-10-20T01:00:00.000Z',
+          serverEndTime: '2026-10-20T01:03:05.000Z',
+        },
+      },
+    });
+    render(<FocusScreen />);
+
+    fireEvent.press(screen.getByTestId('session-result-detail'));
+    expect(mockPush).toHaveBeenCalledWith({
+      pathname: '/session/[id]',
+      params: { id: 's1' },
+    });
   });
 });

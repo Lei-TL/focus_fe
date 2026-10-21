@@ -16,6 +16,7 @@ import { Card } from '@/components/ui/Card';
 import { StartSessionPanel } from '@/components/sessions/StartSessionPanel';
 import { Chip } from '@/components/work-items/Chip';
 import type { WorkItemDetail, WorkItemStatus } from '@/core/api/types';
+import { useSession } from '@/context/session-context';
 import { useDependencyItems } from '@/hooks/use-dependency-items';
 import { useWorkItemDetail } from '@/hooks/use-work-item-detail';
 import { formatDeadline, formatEstimate } from '@/services/work-item-format';
@@ -40,6 +41,7 @@ export default function WorkItemDetailScreen() {
   const id = Array.isArray(params.id) ? params.id[0] : params.id;
   const { detail, loading, error, refresh, applyWorkItem } = useWorkItemDetail(id);
   const dependencyItems = useDependencyItems(detail?.dependsOnWorkItemIds ?? []);
+  const { latestSessionByWorkItem } = useSession();
 
   const [actionError, setActionError] = useState<string | null>(null);
   const [statusSaving, setStatusSaving] = useState<WorkItemStatus | null>(null);
@@ -305,6 +307,26 @@ export default function WorkItemDetailScreen() {
               workItemTitle={detail.title}
               onStarted={() => router.push('/focus')}
             />
+          </Card>
+        ) : null}
+
+        {latestSessionByWorkItem[detail.id] ? (
+          <Card>
+            <Text style={styles.sectionTitle}>Phiên gần nhất</Text>
+            <Text style={styles.mutedText}>
+              Ứng dụng chỉ nhớ phiên đã mở trong lần chạy này; chưa có danh sách lịch sử.
+            </Text>
+            <Pressable
+              onPress={() =>
+                router.push({
+                  pathname: '/session/[id]',
+                  params: { id: latestSessionByWorkItem[detail.id] },
+                })
+              }
+              testID="work-item-latest-session"
+            >
+              <Text style={styles.linkText}>Xem phiên gần nhất</Text>
+            </Pressable>
           </Card>
         ) : null}
 
