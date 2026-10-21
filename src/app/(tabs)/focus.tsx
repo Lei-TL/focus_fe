@@ -3,7 +3,6 @@ import { useFocusEffect } from 'expo-router';
 import {
   ActivityIndicator,
   Alert,
-  AppState,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -14,7 +13,11 @@ import {
 import { Screen } from '@/components/layout/Screen';
 import { StartSessionPanel } from '@/components/sessions/StartSessionPanel';
 import { Card } from '@/components/ui/Card';
-import { useSession, type ActiveFocusSession } from '@/context/session-context';
+import {
+  useSession,
+  type ActiveFocusSession,
+  type SessionContextValue,
+} from '@/context/session-context';
 import { useWorkItems } from '@/hooks/use-work-items';
 import { isSessionError } from '@/services/session-error';
 import type { WorkItemFilters } from '@/services/work-items-service';
@@ -31,8 +34,7 @@ import { colors, radius, spacing } from '@/theme/tokens';
 const FOCUS_FILTERS: WorkItemFilters = { status: 'Open', type: null };
 
 export default function FocusScreen() {
-  const { state, isEnding, end, dismissResult } = useSession();
-  const [appState, setAppState] = useState(AppState.currentState);
+  const { state, isEnding, end, dismissResult, events } = useSession();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [endError, setEndError] = useState<string | null>(null);
   const mountedRef = useRef(true);
@@ -84,13 +86,6 @@ export default function FocusScreen() {
       void refresh();
     }, [refresh, state.kind])
   );
-
-  useEffect(() => {
-    const subscription = AppState.addEventListener('change', (next) => {
-      setAppState(next);
-    });
-    return () => subscription.remove();
-  }, []);
 
   const performEnd = useCallback(
     async (reason: 'Completed' | 'Cancelled') => {
@@ -147,7 +142,7 @@ export default function FocusScreen() {
           <Text style={styles.task} testID="session-active-title">
             {state.session.workItemTitle}
           </Text>
-          <SessionClock key={appState} session={state.session} />
+          <SessionClock key={events.appState} session={state.session} />
           <Text style={styles.meta}>
             Đồng hồ bám mốc giờ máy chủ, tự tính lại khi quay lại ứng dụng.
           </Text>
@@ -184,7 +179,7 @@ export default function FocusScreen() {
           ) : null}
         </Card>
 
-        <AppStateEvidence appState={appState} />
+        <AppStateEvidence events={events} />
       </Screen>
     );
   }
@@ -208,7 +203,7 @@ export default function FocusScreen() {
         <Pressable onPress={restart} style={styles.primaryButton} testID="session-new">
           <Text style={styles.primaryButtonText}>Bắt đầu phiên mới</Text>
         </Pressable>
-        <AppStateEvidence appState={appState} />
+        <AppStateEvidence events={events} />
       </Screen>
     );
   }
@@ -226,7 +221,7 @@ export default function FocusScreen() {
         <Pressable onPress={restart} style={styles.primaryButton} testID="session-missing-dismiss">
           <Text style={styles.primaryButtonText}>Chọn công việc khác</Text>
         </Pressable>
-        <AppStateEvidence appState={appState} />
+        <AppStateEvidence events={events} />
       </Screen>
     );
   }
@@ -308,7 +303,7 @@ export default function FocusScreen() {
         <Text style={styles.hint}>Chọn một công việc để đặt thời lượng và bắt đầu.</Text>
       )}
 
-      <AppStateEvidence appState={appState} />
+      <AppStateEvidence events={events} />
     </Screen>
   );
 }
@@ -338,15 +333,38 @@ function SessionClock({ session }: { session: ActiveFocusSession }) {
   );
 }
 
-function AppStateEvidence({ appState }: { appState: string }) {
+const STOPPED_REASON_LABELS: Record<
+  NonNullable<SessionContextValue['events']['stoppedReason']>,
+  string
+> = {
+  closed: 'Máy chủ báo phiên đã kết thúc nên nhịp tim đã dừng.',
+  missing: 'Máy chủ không còn phiên này nên nhịp tim đã dừng.',
+  disposed: 'Phiên đã kết thúc nên nhịp tim đã dừng.',
+};
+
+function AppStateEvidence({ events }: { events: SessionContextValue['events'] }) {
   return (
     <View style={styles.evidence}>
       <Text style={styles.evidenceTitle}>Bằng chứng phiên</Text>
       <Text style={styles.evidenceText} testID="focus-app-state">
-        AppState hiện tại: {appState}
+        AppState hiện tại: {events.appState}
       </Text>
+      <Text style={styles.evidenceText} testID="session-event-stats">
+        Event: đã gửi {events.sent} · đang chờ {events.pending} · lỗi {events.failed} · trùng{' '}
+        {events.duplicate}
+      </Text>
+      {events.stoppedReason ? (
+        <Text style={styles.evidenceText} testID="session-event-stopped">
+          {STOPPED_REASON_LABELS[events.stoppedReason]}
+        </Text>
+      ) : null}
+      {events.lastError ? (
+        <Text style={[styles.evidenceText, styles.evidenceError]} testID="session-event-error">
+          {events.lastError}
+        </Text>
+      ) : null}
       <Text style={styles.evidenceText}>
-        FE ghi nhận chuyển nền; nhịp tim và sự kiện phiên sẽ được gửi ở bước tiếp theo.
+        Hàng đợi event chỉ nằm trong bộ nhớ: app bị kill có thể mất event chưa gửi.
       </Text>
     </View>
   );
@@ -409,4 +427,5 @@ const styles = StyleSheet.create({
   evidence: { gap: spacing.sm, padding: spacing.md },
   evidenceTitle: { color: colors.text, fontSize: 18, fontWeight: '800' },
   evidenceText: { color: colors.muted, lineHeight: 20 },
+  evidenceError: { color: colors.danger },
 });

@@ -7,6 +7,7 @@ import {
   endFocusSession,
   getCurrentFocusSession,
   getFocusSession,
+  recordFocusSessionEvents,
   startFocusSession,
 } from '@/services/session-service';
 
@@ -15,12 +16,14 @@ jest.mock('@/core/api/sessions', () => ({
   endSession: jest.fn(),
   getSession: jest.fn(),
   getCurrentSession: jest.fn(),
+  recordSessionEvents: jest.fn(),
 }));
 
 const startApi = sessionsApi.startSession as jest.Mock;
 const endApi = sessionsApi.endSession as jest.Mock;
 const detailApi = sessionsApi.getSession as jest.Mock;
 const currentApi = sessionsApi.getCurrentSession as jest.Mock;
+const eventsApi = sessionsApi.recordSessionEvents as jest.Mock;
 
 function httpError(status: number, data?: unknown): AxiosError {
   const config = { headers: {} } as InternalAxiosRequestConfig;
@@ -105,5 +108,35 @@ describe('session-service error mapping', () => {
 
     expect(failure).toBe(cancelled);
     expect(isSessionError(failure)).toBe(false);
+  });
+
+  test('records session events and returns the server counts', async () => {
+    const events = [
+      {
+        clientEventId: '0f7a1e4c-4a3c-4c1b-9b2e-0f9f0d1c2b3a',
+        type: 'Heartbeat' as const,
+        source: 'Device' as const,
+        clientTs: '2026-10-21T09:00:00.000+07:00',
+      },
+    ];
+    eventsApi.mockResolvedValue({ receivedCount: 1, insertedCount: 0, duplicateCount: 1 });
+
+    await expect(recordFocusSessionEvents('s1', events)).resolves.toEqual({
+      receivedCount: 1,
+      insertedCount: 0,
+      duplicateCount: 1,
+    });
+    expect(eventsApi).toHaveBeenCalledWith('s1', events, undefined);
+  });
+
+  test('maps an events 409 to a conflict about the closed session', async () => {
+    eventsApi.mockRejectedValue(httpError(409));
+
+    const failure = await recordFocusSessionEvents('s1', []).catch(
+      (error: unknown) => error
+    );
+
+    expect(failure).toMatchObject({ code: 'conflict', status: 409 });
+    expect((failure as SessionClientError).message).toContain('kết thúc');
   });
 });

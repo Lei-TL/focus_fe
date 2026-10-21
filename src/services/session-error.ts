@@ -1,6 +1,6 @@
 import { isAxiosError } from 'axios';
 
-export type SessionAction = 'start' | 'end' | 'current' | 'detail';
+export type SessionAction = 'start' | 'end' | 'current' | 'detail' | 'events';
 
 export type SessionErrorCode =
   | 'validation'
@@ -113,6 +113,13 @@ export function toSessionError(error: unknown, action: SessionAction): SessionEr
         code: 'workItemNotOpen',
         status,
         message: 'Chỉ có thể bắt đầu phiên cho công việc đang mở.',
+      };
+    }
+    if (action === 'events') {
+      return {
+        code: 'conflict',
+        status,
+        message: 'Phiên đã kết thúc nên sự kiện không được ghi.',
       };
     }
     return {

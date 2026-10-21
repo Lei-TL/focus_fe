@@ -3,7 +3,9 @@ import type {
   CurrentSession,
   EndSessionReason,
   EndedSessionDetail,
+  RecordedEvents,
   SessionDetail,
+  SessionEventInput,
   SessionRead,
 } from '@/core/api/types';
 import {
@@ -52,6 +54,18 @@ export async function getFocusSession(
     return await sessionsApi.getSession(sessionId, signal);
   } catch (error) {
     rethrowMapped(error, 'detail');
+  }
+}
+
+export async function recordFocusSessionEvents(
+  sessionId: string,
+  events: SessionEventInput[],
+  signal?: AbortSignal
+): Promise<RecordedEvents> {
+  try {
+    return await sessionsApi.recordSessionEvents(sessionId, events, signal);
+  } catch (error) {
+    rethrowMapped(error, 'events');
   }
 }
 

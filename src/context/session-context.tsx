@@ -3,6 +3,10 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 
 import type { EndSessionReason, SessionRead, SessionStatus } from '@/core/api/types';
 import { useAuth } from '@/context/auth-context';
+import {
+  useSessionEvents,
+  type SessionEventsEvidence,
+} from '@/hooks/use-session-events';
 import { SessionClientError, isSessionError } from '@/services/session-error';
 import {
   endFocusSession,
@@ -51,6 +55,8 @@ export type SessionContextValue = {
   state: SessionState;
   isStarting: boolean;
   isEnding: boolean;
+  // Heartbeat/AppState evidence for the active (or last) session.
+  events: SessionEventsEvidence;
   start: (input: StartSessionInput) => Promise<void>;
   end: (reason: EndSessionReason) => Promise<void>;
   resume: (sessionId: string, workItemTitle?: string) => Promise<void>;
@@ -124,6 +130,9 @@ function SessionStateProvider({
   const endRef = useRef(false);
   const mountedRef = useRef(true);
 
+  const activeSessionId = state.kind === 'active' ? state.session.sessionId : null;
+  const { evidence: events, flushBeforeEnd } = useSessionEvents(activeSessionId);
+
   useEffect(() => {
     mountedRef.current = true;
     return () => {
@@ -178,6 +187,12 @@ function SessionStateProvider({
       endRef.current = true;
       setIsEnding(true);
       try {
+        // Events sent after the session closes answer 409, so try to drain the
+        // queue first, but never wait longer than the flush deadline.
+        await flushBeforeEnd();
+        if (!canCommit()) {
+          return;
+        }
         const ended = await endFocusSession(active.sessionId, reason);
         if (!canCommit()) {
           return;
@@ -236,7 +251,7 @@ function SessionStateProvider({
         }
       }
     },
-    [canCommit, state]
+    [canCommit, flushBeforeEnd, state]
   );
 
   const resume = useCallback(
@@ -320,8 +335,8 @@ function SessionStateProvider({
   }, []);
 
   const value = useMemo<SessionContextValue>(
-    () => ({ state, isStarting, isEnding, start, end, resume, dismissResult }),
-    [state, isStarting, isEnding, start, end, resume, dismissResult]
+    () => ({ state, isStarting, isEnding, events, start, end, resume, dismissResult }),
+    [state, isStarting, isEnding, events, start, end, resume, dismissResult]
   );
 
   return <SessionContext.Provider value={value}>{children}</SessionContext.Provider>;

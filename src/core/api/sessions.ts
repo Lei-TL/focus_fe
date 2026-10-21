@@ -4,8 +4,11 @@ import type {
   CurrentSession,
   EndSessionReason,
   EndedSessionDetail,
+  RecordedEvents,
+  RecordSessionEventsRequest,
   SessionRead,
   SessionDetail,
+  SessionEventInput,
   StartSessionRequest,
 } from '@/core/api/types';
 
@@ -35,6 +38,19 @@ export async function endSession(
 
 export async function getSession(id: string, signal?: AbortSignal): Promise<SessionRead> {
   return request('get', '/sessions/{id}', { pathParams: { id }, signal });
+}
+
+export async function recordSessionEvents(
+  id: string,
+  events: SessionEventInput[],
+  signal?: AbortSignal
+): Promise<RecordedEvents> {
+  const body: RecordSessionEventsRequest = { events };
+  return request('post', '/sessions/{id}/events', {
+    pathParams: { id },
+    body,
+    signal,
+  });
 }
 
 // `request()` types 200 ahead of 204, so it cannot represent the empty body of

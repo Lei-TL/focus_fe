@@ -1,9 +1,9 @@
 import { act, fireEvent, render, screen } from '@testing-library/react-native';
-import { AppState, type AppStateStatus } from 'react-native';
 
 import FocusScreen from '@/app/(tabs)/focus';
 import type { WorkItemDetail } from '@/core/api/types';
 import type { SessionContextValue } from '@/context/session-context';
+import type { SessionEventsEvidence } from '@/hooks/use-session-events';
 import { useWorkItems } from '@/hooks/use-work-items';
 import { SessionClientError } from '@/services/session-error';
 
@@ -65,11 +65,25 @@ function mockWorkItems(overrides: Partial<ReturnType<typeof useWorkItems>> = {})
   });
 }
 
+function eventsValue(overrides: Partial<SessionEventsEvidence> = {}): SessionEventsEvidence {
+  return {
+    sent: 0,
+    pending: 0,
+    failed: 0,
+    duplicate: 0,
+    lastError: null,
+    stoppedReason: null,
+    appState: 'active',
+    ...overrides,
+  };
+}
+
 function sessionValue(overrides: Partial<SessionContextValue> = {}): SessionContextValue {
   mockSession = {
     state: { kind: 'idle' },
     isStarting: false,
     isEnding: false,
+    events: eventsValue(),
     start: jest.fn(),
     end: jest.fn(),
     resume: jest.fn(),
@@ -276,32 +290,74 @@ describe('FocusScreen', () => {
   });
 
   test('re-reads the device clock when the app returns to the foreground', () => {
-    const addSpy = jest.spyOn(AppState, 'addEventListener');
     const nowSpy = jest
       .spyOn(Date, 'now')
       .mockReturnValue(Date.parse('2026-10-20T01:05:00.000Z'));
     sessionValue({ state: { kind: 'active', session: activeSession } });
 
-    render(<FocusScreen />);
+    const view = render(<FocusScreen />);
     expect(screen.getByTestId('session-timer')).toHaveTextContent('10:00');
 
-    const listener = addSpy.mock.calls[0][1] as (state: AppStateStatus) => void;
-    act(() => {
-      listener('background');
-    });
     nowSpy.mockReturnValue(Date.parse('2026-10-20T01:10:00.000Z'));
-    act(() => {
-      listener('active');
+    sessionValue({
+      state: { kind: 'active', session: activeSession },
+      events: eventsValue({ appState: 'inactive' }),
     });
+    view.rerender(<FocusScreen />);
+    sessionValue({
+      state: { kind: 'active', session: activeSession },
+      events: eventsValue({ appState: 'background' }),
+    });
+    view.rerender(<FocusScreen />);
+    sessionValue({
+      state: { kind: 'active', session: activeSession },
+      events: eventsValue({ appState: 'active' }),
+    });
+    view.rerender(<FocusScreen />);
 
     expect(screen.getByTestId('session-timer')).toHaveTextContent('05:00');
+    nowSpy.mockRestore();
   });
 
-  test('clears the clock interval and the AppState listener on unmount', () => {
+  test('shows the heartbeat and queue evidence coming from the session stream', () => {
+    sessionValue({
+      state: {
+        kind: 'result',
+        result: {
+          sessionId: 's1',
+          workItemId: 'w1',
+          workItemTitle: 'Học React Native',
+          status: 'Completed',
+          grossSeconds: 185,
+          serverStartTime: '2026-10-20T01:00:00.000Z',
+          serverEndTime: '2026-10-20T01:03:05.000Z',
+        },
+      },
+      events: eventsValue({
+        sent: 4,
+        pending: 1,
+        failed: 2,
+        duplicate: 3,
+        lastError: 'Máy chủ đang gặp sự cố.',
+        stoppedReason: 'disposed',
+        appState: 'background',
+      }),
+    });
+
+    render(<FocusScreen />);
+
+    expect(screen.getByTestId('focus-app-state')).toHaveTextContent(/background/);
+    expect(screen.getByTestId('session-event-stats')).toHaveTextContent(/đã gửi 4/);
+    expect(screen.getByTestId('session-event-stats')).toHaveTextContent(/đang chờ 1/);
+    expect(screen.getByTestId('session-event-stats')).toHaveTextContent(/lỗi 2/);
+    expect(screen.getByTestId('session-event-stats')).toHaveTextContent(/trùng 3/);
+    expect(screen.getByTestId('session-event-error')).toHaveTextContent(/sự cố/);
+    expect(screen.getByTestId('session-event-stopped')).toHaveTextContent(/đã kết thúc/);
+  });
+
+  test('clears the clock interval on unmount', () => {
     jest.useFakeTimers();
     sessionValue({ state: { kind: 'active', session: activeSession } });
-    const remove = jest.fn();
-    jest.spyOn(AppState, 'addEventListener').mockReturnValue({ remove } as never);
     const setSpy = jest.spyOn(globalThis, 'setInterval');
     const clearSpy = jest.spyOn(globalThis, 'clearInterval');
 
@@ -313,7 +369,6 @@ describe('FocusScreen', () => {
 
       expect(intervalId).toBeDefined();
       expect(clearSpy).toHaveBeenCalledWith(intervalId);
-      expect(remove).toHaveBeenCalledTimes(1);
     } finally {
       jest.useRealTimers();
     }

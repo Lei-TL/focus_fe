@@ -5,6 +5,7 @@ import {
   endSession,
   getCurrentSession,
   getSession,
+  recordSessionEvents,
   startSession,
 } from '@/core/api/sessions';
 
@@ -101,5 +102,32 @@ describe('session API transport', () => {
     useAdapter(204, undefined);
 
     await expect(getCurrentSession()).resolves.toBeNull();
+  });
+
+  test('records a batch of session events', async () => {
+    const events = [
+      {
+        clientEventId: '0f7a1e4c-4a3c-4c1b-9b2e-0f9f0d1c2b3a',
+        type: 'Heartbeat' as const,
+        source: 'Device' as const,
+        clientTs: '2026-10-21T09:00:00.000+07:00',
+      },
+      {
+        clientEventId: '5d2b8f10-2c4e-4f6a-8b7c-1a2b3c4d5e6f',
+        type: 'Background' as const,
+        source: 'Device' as const,
+        clientTs: '2026-10-21T09:00:30.000+07:00',
+      },
+    ];
+    useAdapter(200, { receivedCount: 2, insertedCount: 1, duplicateCount: 1 });
+
+    await expect(recordSessionEvents('s1', events)).resolves.toEqual({
+      receivedCount: 2,
+      insertedCount: 1,
+      duplicateCount: 1,
+    });
+
+    expect(captured[0]).toMatchObject({ method: 'post', url: '/sessions/s1/events' });
+    expect(bodyOf(captured[0])).toEqual({ events });
   });
 });

@@ -1,6 +1,6 @@
 import { useEffect } from 'react';
 import { act, render, waitFor } from '@testing-library/react-native';
-import { Text } from 'react-native';
+import { AppState, Text } from 'react-native';
 
 import {
   SessionProvider,
@@ -22,12 +22,14 @@ jest.mock('@/services/session-service', () => ({
   endFocusSession: jest.fn(),
   getCurrentFocusSession: jest.fn(),
   getFocusSession: jest.fn(),
+  recordFocusSessionEvents: jest.fn(),
 }));
 
 const startMock = sessionService.startFocusSession as jest.Mock;
 const endMock = sessionService.endFocusSession as jest.Mock;
 const currentMock = sessionService.getCurrentFocusSession as jest.Mock;
 const detailMock = sessionService.getFocusSession as jest.Mock;
+const recordMock = sessionService.recordFocusSessionEvents as jest.Mock;
 
 const started = {
   sessionId: 's1',
@@ -139,7 +141,7 @@ describe('SessionProvider', () => {
     await act(async () => {
       const first = captured?.end('Completed');
       const second = captured?.end('Cancelled');
-      expect(endMock).toHaveBeenCalledTimes(1);
+      await waitFor(() => expect(endMock).toHaveBeenCalledTimes(1));
       expect(endMock).toHaveBeenCalledWith('s1', 'Completed');
       release(ended);
       await Promise.all([first, second]);
@@ -328,5 +330,124 @@ describe('SessionProvider', () => {
     );
 
     await waitFor(() => expect(captured?.state.kind).toBe('idle'));
+  });
+});
+
+describe('SessionProvider event stream', () => {
+  const base = Date.parse('2026-10-21T02:00:00.000Z');
+
+  beforeEach(() => {
+    jest.useFakeTimers();
+    jest.setSystemTime(base);
+    recordMock.mockImplementation(async (_id: string, events: unknown[]) => ({
+      receivedCount: events.length,
+      insertedCount: events.length,
+      duplicateCount: 0,
+    }));
+  });
+
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+
+  test('flushes queued events before calling end', async () => {
+    const order: string[] = [];
+    startMock.mockResolvedValue(started);
+    recordMock.mockImplementation(async () => {
+      order.push('events');
+      return { receivedCount: 1, insertedCount: 1, duplicateCount: 0 };
+    });
+    endMock.mockImplementation(async () => {
+      order.push('end');
+      return ended;
+    });
+
+    renderProvider();
+    await act(async () => {
+      await captured?.start(input);
+    });
+    await act(async () => {
+      await jest.advanceTimersByTimeAsync(30_000);
+    });
+    // The heartbeat is queued but its coalescing timer has not fired yet.
+    expect(recordMock).not.toHaveBeenCalled();
+
+    await act(async () => {
+      await captured?.end('Completed');
+    });
+
+    expect(recordMock).toHaveBeenCalledTimes(1);
+    expect(order).toEqual(['events', 'end']);
+    expect(captured?.state.kind).toBe('result');
+  });
+
+  test('keeps a single heartbeat per session across re-renders', async () => {
+    startMock.mockResolvedValue(started);
+
+    renderProvider();
+    await act(async () => {
+      await captured?.start(input);
+    });
+    await act(async () => {
+      await jest.advanceTimersByTimeAsync(91_000);
+    });
+
+    // Three 30s ticks, each flushed once. A duplicated interval would send six.
+    expect(recordMock).toHaveBeenCalledTimes(3);
+    expect(captured?.events.sent).toBe(3);
+  });
+
+  test('surfaces a closed session (409) as stopped evidence', async () => {
+    startMock.mockResolvedValue(started);
+    recordMock.mockRejectedValue(
+      new SessionClientError({ code: 'conflict', message: 'closed' })
+    );
+
+    renderProvider();
+    await act(async () => {
+      await captured?.start(input);
+    });
+    await act(async () => {
+      await jest.advanceTimersByTimeAsync(31_000);
+    });
+
+    expect(captured?.events.stoppedReason).toBe('closed');
+    expect(captured?.events.pending).toBe(0);
+    expect(captured?.state.kind).toBe('active');
+  });
+
+  test('stops the emitter and removes the AppState listener on sign out', async () => {
+    const remove = jest.fn();
+    const addSpy = jest
+      .spyOn(AppState, 'addEventListener')
+      .mockReturnValue({ remove } as never);
+    startMock.mockResolvedValue(started);
+
+    try {
+      const view = renderProvider();
+      await act(async () => {
+        await captured?.start(input);
+      });
+      await act(async () => {
+        await jest.advanceTimersByTimeAsync(31_000);
+      });
+      expect(recordMock).toHaveBeenCalledTimes(1);
+
+      mockAuthStatus = 'signedOut';
+      view.rerender(
+        <SessionProvider>
+          <Probe />
+        </SessionProvider>
+      );
+
+      expect(remove).toHaveBeenCalled();
+
+      await act(async () => {
+        await jest.advanceTimersByTimeAsync(120_000);
+      });
+      expect(recordMock).toHaveBeenCalledTimes(1);
+    } finally {
+      addSpy.mockRestore();
+    }
   });
 });
