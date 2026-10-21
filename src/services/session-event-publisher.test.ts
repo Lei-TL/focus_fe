@@ -1,5 +1,6 @@
 import type { RecordedEvents, SessionEventInput } from '@/core/api/types';
 import {
+  SESSION_EVENT_MAX_RETRY_ATTEMPTS,
   SessionEventPublisher,
   type SessionEventStats,
 } from '@/services/session-event-publisher';
@@ -46,9 +47,11 @@ describe('SessionEventPublisher', () => {
     await jest.advanceTimersByTimeAsync(1_000);
 
     expect(send).toHaveBeenCalledTimes(1);
-    expect(send).toHaveBeenCalledWith('s1', [
-      expect.objectContaining({ type: 'Heartbeat', source: 'Device' }),
-    ]);
+    expect(send).toHaveBeenCalledWith(
+      's1',
+      [expect.objectContaining({ type: 'Heartbeat', source: 'Device' })],
+      expect.any(AbortSignal)
+    );
     const first = send.mock.calls[0][1][0];
     expect(first.clientEventId).toMatch(UUID_V4);
     expect(Date.parse(first.clientTs)).toBe(base + 30_000);
@@ -276,6 +279,109 @@ describe('SessionEventPublisher', () => {
     release(recorded(1));
     await jest.advanceTimersByTimeAsync(0);
     expect(publisher.getStats().sent).toBe(0);
+  });
+
+  test('drops a batch after the retry cap and still sends later events', async () => {
+    let failing = true;
+    const send = jest.fn(async (_id: string, events: SessionEventInput[]) => {
+      if (failing) {
+        throw mapError('network');
+      }
+      return recorded(events.length);
+    });
+    const publisher = new SessionEventPublisher({
+      sessionId: 's1',
+      send,
+      retryDelaysMs: [1_000],
+    });
+
+    publisher.enqueue('Heartbeat');
+    await jest.advanceTimersByTimeAsync(1_000);
+    expect(send).toHaveBeenCalledTimes(1);
+
+    // 6 retries after the first attempt, then the batch is dropped.
+    for (let attempt = 0; attempt < SESSION_EVENT_MAX_RETRY_ATTEMPTS; attempt += 1) {
+      await jest.advanceTimersByTimeAsync(1_000);
+    }
+    expect(send).toHaveBeenCalledTimes(1 + SESSION_EVENT_MAX_RETRY_ATTEMPTS);
+    expect(publisher.getStats()).toMatchObject({ pending: 0, failed: 1, sent: 0 });
+    expect(publisher.getStats().lastError).toContain(
+      `${SESSION_EVENT_MAX_RETRY_ATTEMPTS + 1} lần thử`
+    );
+
+    // The exhausted batch is not retried again...
+    await jest.advanceTimersByTimeAsync(600_000);
+    expect(send).toHaveBeenCalledTimes(1 + SESSION_EVENT_MAX_RETRY_ATTEMPTS);
+
+    // ...but the publisher is still alive for events queued afterwards.
+    failing = false;
+    publisher.enqueue('Foreground');
+    await jest.advanceTimersByTimeAsync(1_000);
+    expect(send).toHaveBeenCalledTimes(2 + SESSION_EVENT_MAX_RETRY_ATTEMPTS);
+    const lastCall = send.mock.calls[send.mock.calls.length - 1];
+    expect(lastCall[1].map((event) => event.type)).toEqual(['Foreground']);
+    expect(publisher.getStats()).toMatchObject({ sent: 1, pending: 0, failed: 1 });
+
+    publisher.dispose();
+  });
+
+  test('aborts the request in flight when disposed', async () => {
+    let signal: AbortSignal | undefined;
+    const send = jest.fn(
+      (_id: string, _events: SessionEventInput[], nextSignal?: AbortSignal) => {
+        signal = nextSignal;
+        return new Promise<RecordedEvents>((_resolve, reject) => {
+          nextSignal?.addEventListener('abort', () => reject(new Error('aborted')));
+        });
+      }
+    );
+    const publisher = new SessionEventPublisher({ sessionId: 's1', send });
+
+    publisher.enqueue('Heartbeat');
+    const flushing = publisher.flush();
+
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(signal).toBeDefined();
+    expect(signal?.aborted).toBe(false);
+
+    publisher.dispose();
+    expect(signal?.aborted).toBe(true);
+
+    await flushing;
+    expect(publisher.getStats()).toMatchObject({
+      pending: 0,
+      failed: 1,
+      sent: 0,
+      stoppedReason: 'disposed',
+    });
+  });
+
+  test('does not report stats when a response arrives after dispose', async () => {
+    let release: (value: RecordedEvents) => void = () => undefined;
+    const send = jest.fn(
+      () =>
+        new Promise<RecordedEvents>((resolve) => {
+          release = resolve;
+        })
+    );
+    const snapshots: SessionEventStats[] = [];
+    const publisher = new SessionEventPublisher({
+      sessionId: 's1',
+      send,
+      onChange: (stats) => snapshots.push(stats),
+    });
+
+    publisher.enqueue('Heartbeat');
+    const flushing = publisher.flush();
+    publisher.dispose();
+    const snapshotsAtDispose = snapshots.length;
+
+    release(recorded(1));
+    await flushing;
+    await jest.advanceTimersByTimeAsync(0);
+
+    expect(snapshots).toHaveLength(snapshotsAtDispose);
+    expect(publisher.getStats()).toMatchObject({ sent: 0, failed: 1 });
   });
 
   test('reports stats through onChange', async () => {

@@ -17,6 +17,7 @@ let captured: SessionEventsEvidence | null = null;
 let flushBeforeEnd: (() => Promise<void>) | null = null;
 let appStateListener: ((state: AppStateStatus) => void) | null = null;
 let removeListener: jest.Mock;
+const renderProbe = jest.fn();
 
 function Probe({ sessionId }: { sessionId: string | null }) {
   const stream = useSessionEvents(sessionId);
@@ -25,6 +26,8 @@ function Probe({ sessionId }: { sessionId: string | null }) {
     captured = stream.evidence;
     flushBeforeEnd = stream.flushBeforeEnd;
   });
+
+  renderProbe();
 
   return <Text testID="stats">{`${stream.evidence.sent}/${stream.evidence.pending}`}</Text>;
 }
@@ -50,6 +53,7 @@ describe('useSessionEvents', () => {
     flushBeforeEnd = null;
     appStateListener = null;
     removeListener = jest.fn();
+    renderProbe.mockClear();
     recordMock.mockReset();
     recordMock.mockImplementation(async (_id: string, events: SessionEventInput[]) => ({
       receivedCount: events.length,
@@ -170,5 +174,34 @@ describe('useSessionEvents', () => {
 
     expect(recordMock).not.toHaveBeenCalled();
     expect(removeListener).toHaveBeenCalledTimes(1);
+  });
+
+  test('aborts the request in flight on unmount without warning', async () => {
+    const signals: (AbortSignal | undefined)[] = [];
+    recordMock.mockImplementation(
+      (_id: string, _events: SessionEventInput[], signal?: AbortSignal) => {
+        signals.push(signal);
+        return new Promise((_resolve, reject) => {
+          signal?.addEventListener('abort', () => reject(new Error('aborted')));
+        });
+      }
+    );
+    const consoleError = jest.spyOn(console, 'error').mockImplementation(() => undefined);
+
+    const view = render(<Probe sessionId="s1" />);
+    await advance(30_000);
+    await advance(1_000);
+
+    expect(signals).toHaveLength(1);
+    expect(signals[0]?.aborted).toBe(false);
+
+    const rendersBeforeUnmount = renderProbe.mock.calls.length;
+    view.unmount();
+    await advance(10_000);
+
+    expect(signals[0]?.aborted).toBe(true);
+    expect(recordMock).toHaveBeenCalledTimes(1);
+    expect(renderProbe).toHaveBeenCalledTimes(rendersBeforeUnmount);
+    expect(consoleError).not.toHaveBeenCalled();
   });
 });

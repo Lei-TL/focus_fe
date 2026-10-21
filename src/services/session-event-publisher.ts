@@ -13,6 +13,12 @@ import {
 // because the queue lives in memory only.
 export const SESSION_EVENT_RETRY_DELAYS_MS = [1_000, 2_000, 4_000, 8_000, 15_000, 30_000];
 
+// Retries are capped as well: an unreachable server would otherwise keep one
+// request per 30s going for the whole session. After this many retries the
+// batch is dropped (counted as failed, last error kept) and only newer events
+// are sent.
+export const SESSION_EVENT_MAX_RETRY_ATTEMPTS = 6;
+
 export type SessionEventStoppedReason = 'closed' | 'missing' | 'disposed';
 
 export type SessionEventStats = {
@@ -30,7 +36,8 @@ export type SessionEventStats = {
 
 export type SessionEventSender = (
   sessionId: string,
-  events: SessionEventInput[]
+  events: SessionEventInput[],
+  signal?: AbortSignal
 ) => Promise<RecordedEvents>;
 
 type SessionEventPublisherOptions = {
@@ -43,6 +50,7 @@ type SessionEventPublisherOptions = {
   flushDelayMs?: number;
   maxBatchSize?: number;
   retryDelaysMs?: number[];
+  maxRetryAttempts?: number;
 };
 
 const INITIAL_STATS: SessionEventStats = {
@@ -78,6 +86,10 @@ export class SessionEventPublisher {
   private readonly flushDelayMs: number;
   private readonly maxBatchSize: number;
   private readonly retryDelaysMs: number[];
+  private readonly maxRetryAttempts: number;
+  // Cancels the request in flight when the publisher stops (end, logout, new
+  // session) instead of waiting for the axios timeout.
+  private readonly abortController = new AbortController();
 
   private readonly queue: SessionEventInput[] = [];
   private stats: SessionEventStats = { ...INITIAL_STATS };
@@ -105,6 +117,10 @@ export class SessionEventPublisher {
       options.retryDelaysMs && options.retryDelaysMs.length > 0
         ? options.retryDelaysMs
         : SESSION_EVENT_RETRY_DELAYS_MS;
+    this.maxRetryAttempts = Math.max(
+      0,
+      options.maxRetryAttempts ?? SESSION_EVENT_MAX_RETRY_ATTEMPTS
+    );
   }
 
   getStats(): SessionEventStats {
@@ -189,7 +205,8 @@ export class SessionEventPublisher {
     return this.inFlight;
   }
 
-  // Clears timers and gives up on unsent events (in-memory queue only).
+  // Clears timers, cancels the request in flight and gives up on unsent events
+  // (in-memory queue only).
   dispose(): void {
     if (this.stopped) {
       return;
@@ -198,6 +215,7 @@ export class SessionEventPublisher {
     this.clearTimer('heartbeat');
     this.clearTimer('flush');
     this.clearTimer('retry');
+    this.abortController.abort();
     if (this.queue.length > 0) {
       this.stats.failed += this.queue.length;
       this.queue.length = 0;
@@ -232,17 +250,26 @@ export class SessionEventPublisher {
     const delay =
       this.retryDelaysMs[Math.min(this.retryAttempt, this.retryDelaysMs.length - 1)];
     this.retryAttempt += 1;
+    this.scheduleRetryTimer(delay);
+  }
+
+  // Separate from scheduleRetry so a fresh batch can be attempted after a short
+  // pause without consuming the retry budget of that new batch.
+  private scheduleRetryTimer(delayMs: number): void {
+    if (this.stopped || this.retryTimer) {
+      return;
+    }
     this.retryTimer = setTimeout(() => {
       this.retryTimer = null;
       void this.flush();
-    }, delay);
+    }, delayMs);
   }
 
   private async drain(): Promise<void> {
     while (!this.stopped && this.queue.length > 0) {
       const batch = this.queue.slice(0, this.maxBatchSize);
       try {
-        const result = await this.send(this.sessionId, batch);
+        const result = await this.send(this.sessionId, batch, this.abortController.signal);
         if (this.stopped) {
           return;
         }
@@ -274,6 +301,11 @@ export class SessionEventPublisher {
           continue;
         }
 
+        if (this.retryAttempt >= this.maxRetryAttempts) {
+          this.dropExhaustedBatch(batch, mapped.message);
+          return;
+        }
+
         this.stats.lastError = mapped.message;
         this.emit();
         this.scheduleRetry();
@@ -282,11 +314,28 @@ export class SessionEventPublisher {
     }
   }
 
+  // The retry cap was reached: drop this batch (counted as failed, last error
+  // kept) so a permanently failing server cannot keep the retry loop alive for
+  // the whole session. Events queued afterwards are still sent.
+  private dropExhaustedBatch(batch: SessionEventInput[], message: string): void {
+    this.queue.splice(0, batch.length);
+    this.stats.failed += batch.length;
+    this.stats.lastError =
+      `Bỏ ${batch.length} event sau ${this.maxRetryAttempts + 1} lần thử: ${message}`;
+    this.retryAttempt = 0;
+    this.emit();
+    if (this.queue.length > 0) {
+      // Short pause before trying the next batch instead of a tight loop.
+      this.scheduleRetryTimer(this.retryDelaysMs[0]);
+    }
+  }
+
   private stopOnClosed(reason: 'closed' | 'missing', message: string): void {
     this.stopped = true;
     this.clearTimer('heartbeat');
     this.clearTimer('flush');
     this.clearTimer('retry');
+    this.abortController.abort();
     this.stats.failed += this.queue.length;
     this.queue.length = 0;
     this.stats.lastError =
