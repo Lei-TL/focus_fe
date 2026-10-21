@@ -497,6 +497,22 @@ describe('FocusScreen', () => {
     expect(screen.queryByTestId('focus-items-empty')).toBeNull();
   });
 
+  test('does not offer the picker before the first check even if recovery reads idle', () => {
+    sessionValue({
+      recovery: { status: 'idle', message: null },
+      checkedOnce: false,
+    });
+
+    render(<FocusScreen />);
+
+    // A first render that still reads `idle` must not claim "no session".
+    expect(screen.getByTestId('session-checking-message')).toHaveTextContent(
+      /Đang kiểm tra phiên/
+    );
+    expect(screen.queryByTestId('focus-item-w1')).toBeNull();
+    expect(screen.queryByTestId('session-start')).toBeNull();
+  });
+
   test('keeps the cached work item list while a later re-check runs', () => {
     sessionValue({
       recovery: { status: 'checking', message: null },

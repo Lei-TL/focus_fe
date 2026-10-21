@@ -269,7 +269,12 @@ export default function FocusScreen() {
   // whether a session is running. Showing the "pick a work item" flow here
   // would read as "there is no session", so say that the check is running
   // instead (a later re-check keeps the list, which is cached data, not a claim).
-  if (recovery.status === 'checking' && !checkedOnce) {
+  // The `idle` case is defensive: it keeps the picker hidden even if a provider
+  // still starts from `idle` before its first check begins. A failed first
+  // check is reported as such instead of being hidden behind this screen.
+  const pendingFirstCheck =
+    !checkedOnce && (recovery.status === 'idle' || recovery.status === 'checking');
+  if (pendingFirstCheck) {
     return (
       <Screen eyebrow="Phiên tập trung" title="Đang kiểm tra phiên">
         <Card>

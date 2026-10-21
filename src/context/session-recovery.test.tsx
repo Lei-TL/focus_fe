@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { act, render } from '@testing-library/react-native';
 import { AppState, Text } from 'react-native';
 
@@ -76,12 +76,19 @@ const currentSession = {
 };
 
 let captured: SessionContextValue | null = null;
+// Recorded from the first render of `Probe`, so it reflects what the first paint
+// would show (before the provider's mount effect starts the check).
+let firstRenderedRecovery: SessionContextValue['recovery'] | null = null;
 
 function Probe() {
   const value = useSession();
+  // `useRef` only reads its argument on the first render, so the ref keeps the
+  // recovery value of the very first paint rather than one reached by an effect.
+  const firstRecovery = useRef(value.recovery);
 
   useEffect(() => {
     captured = value;
+    firstRenderedRecovery = firstRecovery.current;
   });
 
   return <Text testID="kind">{value.state.kind}</Text>;
@@ -109,6 +116,7 @@ beforeEach(() => {
   jest.clearAllMocks();
   mockAuthStatus = 'signedIn';
   captured = null;
+  firstRenderedRecovery = null;
   jest.useFakeTimers();
   jest.setSystemTime(base);
   currentMock.mockResolvedValue(null);
@@ -161,6 +169,17 @@ test('keeps the app without a session when /sessions/current answers 204', async
   expect(currentMock).toHaveBeenCalledTimes(1);
   expect(captured?.state.kind).toBe('idle');
   expect(captured?.recovery.status).toBe('idle');
+});
+
+test('reports the pending check on the first render of a signed-in provider', async () => {
+  renderProvider();
+
+  // The mount check has not answered yet, so the first paint must not claim
+  // "no session": `idle` here would flash the work item picker before the
+  // provider's own effect starts the check.
+  expect(firstRenderedRecovery).toEqual({ status: 'checking', message: null });
+
+  await settle();
 });
 
 test('reports an unchecked state on a network error and retries on demand', async () => {
@@ -262,6 +281,44 @@ test('samples the clock offset before waiting for the work item title', async ()
   // 10s behind real elapsed time.
   expect(restored?.kind === 'active' ? restored.session.clockOffsetMs : null).toBe(300_000);
   expect(restored?.kind === 'active' ? restored.session.workItemTitle : null).toBe('Việc chính');
+});
+
+test('samples the clock offset of a resumed session before waiting for the title', async () => {
+  // The mount check answers 204, so `resume` is the only path that builds the
+  // clock in this test.
+  renderProvider();
+  await settle();
+
+  currentMock.mockResolvedValue(currentSession);
+  // The title lookup is the slow part of a resume (up to the client timeout).
+  workItemDetailMock.mockImplementation(
+    () =>
+      new Promise((resolve) => {
+        setTimeout(() => resolve({ id: 'w1', title: 'Việc chính' }), 10_000);
+      })
+  );
+
+  let resuming: Promise<void> | undefined;
+  await act(async () => {
+    resuming = captured?.resume('s1');
+    for (let i = 0; i < 8; i += 1) {
+      await Promise.resolve();
+    }
+  });
+  // `current` has answered at 02:00Z; only the title is still pending.
+  await act(async () => {
+    await jest.advanceTimersByTimeAsync(10_000);
+  });
+  await act(async () => {
+    await resuming;
+  });
+  await settle();
+
+  const resumed = captured?.state;
+  // Sampling after the title await would give 290_000 and show a clock that is
+  // 10s behind real elapsed time.
+  expect(resumed?.kind === 'active' ? resumed.session.clockOffsetMs : null).toBe(300_000);
+  expect(resumed?.kind === 'active' ? resumed.session.workItemTitle : null).toBe('Việc chính');
 });
 
 test('keeps a running session and reports "not synced" when current answers 204', async () => {

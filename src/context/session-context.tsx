@@ -163,6 +163,12 @@ async function lookupClosedSession(sessionId: string): Promise<ClosedSessionLook
 
 const IDLE_RECOVERY: SessionRecovery = { status: 'idle', message: null };
 
+// A signed-in provider starts out not knowing whether a session is running:
+// the mount effect has not asked yet. Initializing with `idle` would claim
+// "no session" on the very first render and flash the work-item picker before
+// the check begins, so the cold-start state is `checking` instead.
+const PENDING_RECOVERY: SessionRecovery = { status: 'checking', message: null };
+
 // Remounting on auth changes keeps session state scoped to one signed-in user:
 // signing out (or switching accounts) drops the active session, the known
 // session ids and the pending current-session read without a
@@ -188,7 +194,9 @@ function SessionStateProvider({
   const [state, setState] = useState<SessionState>({ kind: 'idle' });
   const [isStarting, setIsStarting] = useState(false);
   const [isEnding, setIsEnding] = useState(false);
-  const [recovery, setRecovery] = useState<SessionRecovery>(IDLE_RECOVERY);
+  const [recovery, setRecovery] = useState<SessionRecovery>(() =>
+    signedIn ? PENDING_RECOVERY : IDLE_RECOVERY
+  );
   const [checkedOnce, setCheckedOnce] = useState(false);
   const [latestSessionByWorkItem, setLatestSessionByWorkItem] = useState<
     Record<string, string>
@@ -373,6 +381,11 @@ function SessionStateProvider({
           return;
         }
         if (current) {
+          // Sample the offset the moment the answer lands, before any other
+          // await: the work-item title lookup below can take up to the client
+          // timeout, and sampling afterwards would lag the resumed clock by
+          // that wait (up to the next focus/foreground check).
+          const clockOffsetMs = estimateClockOffset(current.serverNow, Date.now());
           if (current.sessionId !== sessionId) {
             throw new SessionClientError({
               code: 'conflict',
@@ -393,7 +406,7 @@ function SessionStateProvider({
               workItemTitle: resolvedTitle,
               serverStartTime: current.serverStartTime,
               plannedSeconds: current.plannedSeconds,
-              clockOffsetMs: estimateClockOffset(current.serverNow, Date.now()),
+              clockOffsetMs,
             },
           });
           rememberSession(current.sessionId, current.workItemId);
