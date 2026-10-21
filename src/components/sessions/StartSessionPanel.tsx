@@ -26,7 +26,12 @@ export function StartSessionPanel({ workItemId, workItemTitle, onStarted }: Prop
     () => sessionDurationOptions(profile?.defaultSessionMinutes),
     [profile?.defaultSessionMinutes]
   );
-  const [minutes, setMinutes] = useState(defaultMinutes);
+  // Follow the profile default until the user picks a duration. Deriving it
+  // also covers a profile that arrives after mount: `defaultMinutes` is then
+  // already clamped to 15–90, so the matching chip is highlighted and that
+  // value is sent instead of the pre-profile guess.
+  const [pickedMinutes, setPickedMinutes] = useState<number | null>(null);
+  const minutes = pickedMinutes ?? defaultMinutes;
   const [error, setError] = useState<SessionError | null>(null);
   const [resuming, setResuming] = useState(false);
   const submitRef = useRef(false);
@@ -110,7 +115,7 @@ export function StartSessionPanel({ workItemId, workItemTitle, onStarted }: Prop
               label={`${option} phút`}
               selected={minutes === option}
               disabled={busy}
-              onPress={() => setMinutes(option)}
+              onPress={() => setPickedMinutes(option)}
               testID={`session-duration-${option}`}
             />
           ))}

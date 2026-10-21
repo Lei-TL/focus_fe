@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { useFocusEffect } from 'expo-router';
 import {
   ActivityIndicator,
   Alert,
@@ -16,6 +17,7 @@ import { Card } from '@/components/ui/Card';
 import { useSession, type ActiveFocusSession } from '@/context/session-context';
 import { useWorkItems } from '@/hooks/use-work-items';
 import { isSessionError } from '@/services/session-error';
+import type { WorkItemFilters } from '@/services/work-items-service';
 import { workItemStatusLabel, workItemTypeLabel } from '@/services/work-item-options';
 import {
   computeSessionTiming,
@@ -24,6 +26,9 @@ import {
   formatSessionTimer,
 } from '@/services/session-time';
 import { colors, radius, spacing } from '@/theme/tokens';
+
+// The focus tab only starts sessions on items that are still Open.
+const FOCUS_FILTERS: WorkItemFilters = { status: 'Open', type: null };
 
 export default function FocusScreen() {
   const { state, isEnding, end, dismissResult } = useSession();
@@ -44,19 +49,41 @@ export default function FocusScreen() {
     filters,
     setFilters,
     loading,
+    refreshing,
     loadingMore,
     error: listError,
     hasMore,
     reload,
+    refresh,
     loadMore,
-  } = useWorkItems();
+  } = useWorkItems({
+    // The list is hidden while a session is running or its result is shown, so
+    // there is nothing to fetch in those states.
+    enabled: state.kind === 'idle',
+    initialFilters: FOCUS_FILTERS,
+  });
 
-  // The focus tab only starts sessions on items that are still Open.
   useEffect(() => {
     if (filters.status !== 'Open' || filters.type !== null) {
       setFilters({ status: 'Open', type: null });
     }
   }, [filters.status, filters.type, setFilters]);
+
+  // Work items created or closed on other screens must show up here when the
+  // user comes back to this tab; the tab stays mounted between visits.
+  const firstFocusRef = useRef(true);
+  useFocusEffect(
+    useCallback(() => {
+      if (firstFocusRef.current) {
+        firstFocusRef.current = false;
+        return;
+      }
+      if (state.kind !== 'idle') {
+        return;
+      }
+      void refresh();
+    }, [refresh, state.kind])
+  );
 
   useEffect(() => {
     const subscription = AppState.addEventListener('change', (next) => {
@@ -67,7 +94,9 @@ export default function FocusScreen() {
 
   const performEnd = useCallback(
     async (reason: 'Completed' | 'Cancelled') => {
-      setEndError(null);
+      if (mountedRef.current) {
+        setEndError(null);
+      }
       try {
         await end(reason);
       } catch (endFailure) {
@@ -184,12 +213,42 @@ export default function FocusScreen() {
     );
   }
 
+  if (state.kind === 'missing') {
+    return (
+      <Screen eyebrow="Phiên tập trung" title="Không tìm thấy phiên">
+        <Card>
+          <Text style={styles.label}>Công việc</Text>
+          <Text style={styles.task}>{state.workItemTitle}</Text>
+          <Text style={styles.meta} testID="session-missing-message">
+            {state.message}
+          </Text>
+        </Card>
+        <Pressable onPress={restart} style={styles.primaryButton} testID="session-missing-dismiss">
+          <Text style={styles.primaryButtonText}>Chọn công việc khác</Text>
+        </Pressable>
+        <AppStateEvidence appState={appState} />
+      </Screen>
+    );
+  }
+
   const selectedItem = items.find((item) => item.id === selectedId) ?? null;
 
   return (
     <Screen eyebrow="Phiên tập trung" title="Chọn công việc">
       <Card>
-        <Text style={styles.sectionTitle}>Công việc đang mở</Text>
+        <View style={styles.sectionHeader}>
+          <Text style={styles.sectionTitle}>Công việc đang mở</Text>
+          <Pressable
+            accessibilityRole="button"
+            disabled={loading || refreshing}
+            onPress={() => void refresh()}
+            testID="focus-items-refresh"
+          >
+            <Text style={[styles.linkText, (loading || refreshing) && styles.disabled]}>
+              {refreshing ? 'Đang làm mới…' : 'Làm mới'}
+            </Text>
+          </Pressable>
+        </View>
         {loading ? (
           <ActivityIndicator color={colors.primary} testID="focus-items-loading" />
         ) : listError ? (
@@ -240,6 +299,7 @@ export default function FocusScreen() {
         <Card>
           <Text style={styles.sectionTitle}>{selectedItem.title}</Text>
           <StartSessionPanel
+            key={selectedItem.id}
             workItemId={selectedItem.id}
             workItemTitle={selectedItem.title}
           />
@@ -304,6 +364,12 @@ const styles = StyleSheet.create({
   },
   meta: { color: colors.muted, textAlign: 'center' },
   sectionTitle: { color: colors.text, fontSize: 17, fontWeight: '800' },
+  sectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: spacing.sm,
+  },
   primaryButton: {
     padding: spacing.md,
     borderRadius: radius.md,

@@ -214,6 +214,9 @@ describe('SessionProvider', () => {
   });
 
   test('resumes the active session using serverNow as the clock anchor', async () => {
+    const nowSpy = jest
+      .spyOn(Date, 'now')
+      .mockReturnValue(Date.parse('2026-10-20T01:04:30.000Z'));
     currentMock.mockResolvedValue({
       sessionId: 's1',
       workItemId: 'w1',
@@ -223,15 +226,89 @@ describe('SessionProvider', () => {
       serverNow: '2026-10-20T01:05:00.000Z',
     });
 
+    try {
+      renderProvider();
+      await act(async () => {
+        await captured?.resume('s1', 'Việc chính');
+      });
+
+      expect(captured?.state).toMatchObject({
+        kind: 'active',
+        session: { sessionId: 's1', plannedSeconds: 1800, workItemTitle: 'Việc chính' },
+      });
+      const resumed = captured?.state;
+      // serverNow (01:05) minus device now (01:04:30). Anchoring on
+      // serverStartTime instead would give -270000 and restart/reset the clock.
+      expect(resumed?.kind === 'active' ? resumed.session.clockOffsetMs : null).toBe(30_000);
+    } finally {
+      nowSpy.mockRestore();
+    }
+  });
+
+  test('drops a session the server no longer has instead of staying stuck', async () => {
+    startMock.mockResolvedValue(started);
+    endMock.mockRejectedValue(new SessionClientError({ code: 'notFound', message: 'not found' }));
+    detailMock.mockRejectedValue(
+      new SessionClientError({ code: 'notFound', message: 'not found' })
+    );
+
     renderProvider();
     await act(async () => {
-      await captured?.resume('s1', 'Việc chính');
+      await captured?.start(input);
+    });
+    await act(async () => {
+      await captured?.end('Completed');
     });
 
-    expect(captured?.state).toMatchObject({
-      kind: 'active',
-      session: { sessionId: 's1', plannedSeconds: 1800, workItemTitle: 'Việc chính' },
+    expect(detailMock).toHaveBeenCalledWith('s1');
+    expect(captured?.state).toMatchObject({ kind: 'missing', sessionId: 's1' });
+
+    await act(async () => {
+      captured?.dismissResult();
     });
+    expect(captured?.state.kind).toBe('idle');
+  });
+
+  test('keeps the active session when the follow-up read fails for another reason', async () => {
+    startMock.mockResolvedValue(started);
+    endMock.mockRejectedValue(new SessionClientError({ code: 'notFound', message: 'not found' }));
+    detailMock.mockRejectedValue(new SessionClientError({ code: 'network', message: 'network' }));
+
+    renderProvider();
+    await act(async () => {
+      await captured?.start(input);
+    });
+
+    await expect(
+      act(async () => {
+        await captured?.end('Completed');
+      })
+    ).rejects.toMatchObject({ code: 'notFound' });
+
+    expect(captured?.state.kind).toBe('active');
+  });
+
+  test('keeps the active session when the follow-up read still says Active', async () => {
+    startMock.mockResolvedValue(started);
+    endMock.mockRejectedValue(new SessionClientError({ code: 'notFound', message: 'not found' }));
+    detailMock.mockResolvedValue({
+      ...started,
+      grossSeconds: null,
+      serverEndTime: null,
+    });
+
+    renderProvider();
+    await act(async () => {
+      await captured?.start(input);
+    });
+
+    await expect(
+      act(async () => {
+        await captured?.end('Completed');
+      })
+    ).rejects.toMatchObject({ code: 'notFound' });
+
+    expect(captured?.state.kind).toBe('active');
   });
 
   test('clears the session when the auth state leaves signedIn', async () => {

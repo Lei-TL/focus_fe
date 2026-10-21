@@ -28,8 +28,18 @@ function filtersKey(filters: WorkItemFilters): string {
   return `${filters.status ?? ''}|${filters.type ?? ''}`;
 }
 
-export function useWorkItems() {
-  const [filters, setFilters] = useState<WorkItemFilters>(emptyWorkItemFilters);
+type Options = {
+  // Screens that hide the list behind another view can pause loading entirely.
+  enabled?: boolean;
+  // Avoids a second request when a screen only ever needs one filter set.
+  initialFilters?: WorkItemFilters;
+};
+
+export function useWorkItems(options: Options = {}) {
+  const enabled = options.enabled ?? true;
+  const [filters, setFilters] = useState<WorkItemFilters>(
+    () => options.initialFilters ?? emptyWorkItemFilters()
+  );
   const [token, setToken] = useState(0);
   const [state, setState] = useState<LoadedPage>({
     key: '',
@@ -57,6 +67,9 @@ export function useWorkItems() {
   }, []);
 
   useEffect(() => {
+    if (!enabled) {
+      return;
+    }
     controllerRef.current?.abort();
     const controller = new AbortController();
     controllerRef.current = controller;
@@ -93,13 +106,16 @@ export function useWorkItems() {
       active = false;
       controller.abort();
     };
-  }, [filters, key, token]);
+  }, [enabled, filters, key, token]);
 
   const reload = useCallback(() => {
     setToken((current) => current + 1);
   }, []);
 
   const refresh = useCallback(async (): Promise<boolean> => {
+    if (!enabled) {
+      return false;
+    }
     controllerRef.current?.abort();
     const controller = new AbortController();
     controllerRef.current = controller;
@@ -136,7 +152,7 @@ export function useWorkItems() {
         setRefreshing(false);
       }
     }
-  }, [filters, key, token]);
+  }, [enabled, filters, key, token]);
 
   const loaded = state.key === key && state.token === token;
   const error =

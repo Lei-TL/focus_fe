@@ -1,7 +1,7 @@
 import type { PropsWithChildren } from 'react';
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 
-import type { EndSessionReason, SessionStatus } from '@/core/api/types';
+import type { EndSessionReason, SessionRead, SessionStatus } from '@/core/api/types';
 import { useAuth } from '@/context/auth-context';
 import { SessionClientError, isSessionError } from '@/services/session-error';
 import {
@@ -35,7 +35,11 @@ export type FocusSessionResult = {
 export type SessionState =
   | { kind: 'idle' }
   | { kind: 'active'; session: ActiveFocusSession }
-  | { kind: 'result'; result: FocusSessionResult };
+  | { kind: 'result'; result: FocusSessionResult }
+  // The server says the session no longer exists (end and detail both 404).
+  // There is no result to show, but the user must not stay stuck on a session
+  // that can never be ended successfully.
+  | { kind: 'missing'; sessionId: string; workItemTitle: string; message: string };
 
 export type StartSessionInput = {
   workItemId: string;
@@ -68,6 +72,27 @@ async function resolveWorkItemTitle(workItemId: string, fallback: string): Promi
     return item.title;
   } catch {
     return fallback;
+  }
+}
+
+type ClosedSessionLookup =
+  | { kind: 'finished'; detail: SessionRead }
+  | { kind: 'missing' }
+  | { kind: 'unknown' };
+
+// After a 404 on end, re-read the session. `missing` means the server has no
+// record of it at all; any other failure stays `unknown` so the caller keeps
+// the active session and can retry (network errors must not drop a session).
+async function lookupClosedSession(sessionId: string): Promise<ClosedSessionLookup> {
+  try {
+    const detail = await getFocusSession(sessionId);
+    return detail.status === 'Active'
+      ? { kind: 'unknown' }
+      : { kind: 'finished', detail };
+  } catch (error) {
+    return isSessionError(error) && error.code === 'notFound'
+      ? { kind: 'missing' }
+      : { kind: 'unknown' };
   }
 }
 
@@ -173,25 +198,34 @@ function SessionStateProvider({
         // A 404 on end means the session may already be closed. Re-read it and
         // show the persisted result instead of losing the finished session.
         if (isSessionError(error) && error.code === 'notFound') {
-          try {
-            const detail = await getFocusSession(active.sessionId);
-            if (detail.status !== 'Active' && canCommit()) {
-              setState({
-                kind: 'result',
-                result: {
-                  sessionId: detail.sessionId,
-                  workItemId: detail.workItemId,
-                  workItemTitle: active.workItemTitle,
-                  status: finishedStatus(detail.status, reason),
-                  grossSeconds: detail.grossSeconds ?? 0,
-                  serverStartTime: detail.serverStartTime,
-                  serverEndTime: detail.serverEndTime,
-                },
-              });
-              return;
-            }
-          } catch {
-            // Keep the original error below; the secondary read is best-effort.
+          const lookup = await lookupClosedSession(active.sessionId);
+          if (!canCommit()) {
+            return;
+          }
+          if (lookup.kind === 'finished') {
+            setState({
+              kind: 'result',
+              result: {
+                sessionId: lookup.detail.sessionId,
+                workItemId: lookup.detail.workItemId,
+                workItemTitle: active.workItemTitle,
+                status: finishedStatus(lookup.detail.status, reason),
+                grossSeconds: lookup.detail.grossSeconds ?? 0,
+                serverStartTime: lookup.detail.serverStartTime,
+                serverEndTime: lookup.detail.serverEndTime,
+              },
+            });
+            return;
+          }
+          if (lookup.kind === 'missing') {
+            setState({
+              kind: 'missing',
+              sessionId: active.sessionId,
+              workItemTitle: active.workItemTitle,
+              message:
+                'Máy chủ không còn phiên này nên ứng dụng đã đóng nó lại. Không có kết quả để hiển thị.',
+            });
+            return;
           }
         }
         throw error;
@@ -280,7 +314,9 @@ function SessionStateProvider({
   );
 
   const dismissResult = useCallback(() => {
-    setState((current) => (current.kind === 'result' ? { kind: 'idle' } : current));
+    setState((current) =>
+      current.kind === 'result' || current.kind === 'missing' ? { kind: 'idle' } : current
+    );
   }, []);
 
   const value = useMemo<SessionContextValue>(

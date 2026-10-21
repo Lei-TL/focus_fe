@@ -46,6 +46,40 @@ function deferred<T>() {
 }
 
 describe('useWorkItems', () => {
+  test('does not request anything until it is enabled', async () => {
+    fetchPageMock.mockResolvedValue(page([item('a')], 1, 1));
+
+    const { result, rerender } = renderHook(
+      ({ enabled }: { enabled: boolean }) => useWorkItems({ enabled }),
+      { initialProps: { enabled: false } }
+    );
+
+    expect(fetchPageMock).not.toHaveBeenCalled();
+    await act(async () => {
+      await result.current.refresh();
+    });
+    expect(fetchPageMock).not.toHaveBeenCalled();
+
+    rerender({ enabled: true });
+
+    await waitFor(() => expect(result.current.items).toHaveLength(1));
+    expect(fetchPageMock).toHaveBeenCalledTimes(1);
+  });
+
+  test('starts from the provided filters without a second request', async () => {
+    fetchPageMock.mockResolvedValue(page([item('a')], 1, 1));
+
+    const { result } = renderHook(() =>
+      useWorkItems({ initialFilters: { status: 'Open', type: null } })
+    );
+
+    await waitFor(() => expect(result.current.items).toHaveLength(1));
+
+    expect(fetchPageMock).toHaveBeenCalledTimes(1);
+    expect(fetchPageMock.mock.calls[0][1]).toEqual({ status: 'Open', type: null });
+    expect(result.current.filters).toEqual({ status: 'Open', type: null });
+  });
+
   test('aborts the initial request when the component unmounts', async () => {
     const pending = deferred<WorkItemsPage>();
     fetchPageMock.mockReturnValue(pending.promise);

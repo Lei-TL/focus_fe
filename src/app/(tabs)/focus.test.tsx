@@ -1,4 +1,5 @@
-import { fireEvent, render, screen } from '@testing-library/react-native';
+import { act, fireEvent, render, screen } from '@testing-library/react-native';
+import { AppState, type AppStateStatus } from 'react-native';
 
 import FocusScreen from '@/app/(tabs)/focus';
 import type { WorkItemDetail } from '@/core/api/types';
@@ -7,6 +8,13 @@ import { useWorkItems } from '@/hooks/use-work-items';
 import { SessionClientError } from '@/services/session-error';
 
 let mockSession: SessionContextValue;
+let mockFocusCallback: (() => void | (() => void)) | null = null;
+
+jest.mock('expo-router', () => ({
+  useFocusEffect: (callback: () => void | (() => void)) => {
+    mockFocusCallback = callback;
+  },
+}));
 
 jest.mock('@/context/session-context', () => ({
   useSession: () => mockSession,
@@ -73,9 +81,23 @@ function sessionValue(overrides: Partial<SessionContextValue> = {}): SessionCont
 
 beforeEach(() => {
   jest.clearAllMocks();
+  mockFocusCallback = null;
   mockWorkItems();
   sessionValue();
 });
+
+afterEach(() => {
+  jest.restoreAllMocks();
+});
+
+const activeSession = {
+  sessionId: 's1',
+  workItemId: 'w1',
+  workItemTitle: 'Học React Native',
+  serverStartTime: '2026-10-20T01:00:00.000Z',
+  plannedSeconds: 900,
+  clockOffsetMs: 0,
+};
 
 describe('FocusScreen', () => {
   test('lists open work items and lets the user pick one to start', () => {
@@ -162,5 +184,138 @@ describe('FocusScreen', () => {
     fireEvent.press(screen.getByTestId('session-start'));
 
     expect(await screen.findByTestId('session-open-active')).toBeTruthy();
+  });
+
+  test('refreshes the list when the tab is focused again', () => {
+    const refresh = jest.fn();
+    mockWorkItems({ refresh });
+
+    render(<FocusScreen />);
+    // First focus only loads the list (the hook itself already fetched it).
+    act(() => {
+      mockFocusCallback?.();
+    });
+    expect(refresh).not.toHaveBeenCalled();
+
+    act(() => {
+      mockFocusCallback?.();
+    });
+    expect(refresh).toHaveBeenCalledTimes(1);
+  });
+
+  test('does not refresh the list while a session is active', () => {
+    const refresh = jest.fn();
+    mockWorkItems({ refresh });
+    sessionValue({ state: { kind: 'active', session: activeSession } });
+
+    render(<FocusScreen />);
+    act(() => {
+      mockFocusCallback?.();
+    });
+    act(() => {
+      mockFocusCallback?.();
+    });
+
+    expect(refresh).not.toHaveBeenCalled();
+    expect(useWorkItemsMock).toHaveBeenCalledWith(
+      expect.objectContaining({ enabled: false })
+    );
+  });
+
+  test('refreshes on demand from the list header', () => {
+    const refresh = jest.fn();
+    mockWorkItems({ refresh });
+
+    render(<FocusScreen />);
+    fireEvent.press(screen.getByTestId('focus-items-refresh'));
+
+    expect(refresh).toHaveBeenCalledTimes(1);
+  });
+
+  test('drops the previous start error when another work item is selected', async () => {
+    const start = jest
+      .fn()
+      .mockRejectedValue(
+        new SessionClientError({ code: 'workItemNotOpen', message: 'Chỉ có thể bắt đầu phiên cho công việc đang mở.' })
+      );
+    sessionValue({ start });
+    mockWorkItems({
+      items: [item(), item({ id: 'w2', title: 'Viết báo cáo' })],
+      totalCount: 2,
+    });
+
+    render(<FocusScreen />);
+    fireEvent.press(screen.getByTestId('focus-item-w1'));
+    fireEvent.press(screen.getByTestId('session-start'));
+    expect(await screen.findByTestId('session-start-error')).toBeTruthy();
+
+    fireEvent.press(screen.getByTestId('focus-item-w2'));
+
+    expect(screen.queryByTestId('session-start-error')).toBeNull();
+  });
+
+  test('explains a session the server no longer has and offers a way out', () => {
+    const dismissResult = jest.fn();
+    sessionValue({
+      state: {
+        kind: 'missing',
+        sessionId: 's1',
+        workItemTitle: 'Học React Native',
+        message: 'Máy chủ không còn phiên này nên ứng dụng đã đóng nó lại.',
+      },
+      dismissResult,
+    });
+
+    render(<FocusScreen />);
+
+    expect(screen.getByTestId('session-missing-message')).toHaveTextContent(
+      /không còn phiên/
+    );
+    fireEvent.press(screen.getByTestId('session-missing-dismiss'));
+    expect(dismissResult).toHaveBeenCalledTimes(1);
+  });
+
+  test('re-reads the device clock when the app returns to the foreground', () => {
+    const addSpy = jest.spyOn(AppState, 'addEventListener');
+    const nowSpy = jest
+      .spyOn(Date, 'now')
+      .mockReturnValue(Date.parse('2026-10-20T01:05:00.000Z'));
+    sessionValue({ state: { kind: 'active', session: activeSession } });
+
+    render(<FocusScreen />);
+    expect(screen.getByTestId('session-timer')).toHaveTextContent('10:00');
+
+    const listener = addSpy.mock.calls[0][1] as (state: AppStateStatus) => void;
+    act(() => {
+      listener('background');
+    });
+    nowSpy.mockReturnValue(Date.parse('2026-10-20T01:10:00.000Z'));
+    act(() => {
+      listener('active');
+    });
+
+    expect(screen.getByTestId('session-timer')).toHaveTextContent('05:00');
+  });
+
+  test('clears the clock interval and the AppState listener on unmount', () => {
+    jest.useFakeTimers();
+    sessionValue({ state: { kind: 'active', session: activeSession } });
+    const remove = jest.fn();
+    jest.spyOn(AppState, 'addEventListener').mockReturnValue({ remove } as never);
+    const setSpy = jest.spyOn(globalThis, 'setInterval');
+    const clearSpy = jest.spyOn(globalThis, 'clearInterval');
+
+    try {
+      const view = render(<FocusScreen />);
+      const intervalId = setSpy.mock.results[0]?.value;
+
+      view.unmount();
+
+      expect(intervalId).toBeDefined();
+      expect(clearSpy).toHaveBeenCalledWith(intervalId);
+      expect(remove).toHaveBeenCalledTimes(1);
+    } finally {
+      jest.useRealTimers();
+    }
   });
 });
