@@ -39,6 +39,7 @@ beforeEach(() => {
     resume: jest.fn(),
     dismissResult: jest.fn(),
     recovery: { status: 'idle', message: null },
+    checkedOnce: true,
     latestSessionByWorkItem: {},
     checkCurrent: jest.fn(),
   };

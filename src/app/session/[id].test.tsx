@@ -87,7 +87,22 @@ describe('SessionResultScreen', () => {
 
     expect(await screen.findByTestId('session-detail-status')).toHaveTextContent('Đã hủy');
     expect(screen.getByTestId('session-detail-timezone-fallback')).toHaveTextContent(
+      /không hợp lệ/
+    );
+    expect(screen.getByTestId('session-detail-timezone-fallback')).toHaveTextContent(
       /giờ cục bộ/
+    );
+    expect(screen.getByTestId('session-detail-timezone')).toHaveTextContent(/local/);
+  });
+
+  test('explains a fallback when the profile has no time zone', async () => {
+    mockTimeZone = '';
+    detailMock.mockResolvedValue(sessionDetail());
+
+    render(<SessionResultScreen />);
+
+    expect(await screen.findByTestId('session-detail-timezone-fallback')).toHaveTextContent(
+      /Hồ sơ chưa có múi giờ/
     );
     expect(screen.getByTestId('session-detail-timezone')).toHaveTextContent(/local/);
   });

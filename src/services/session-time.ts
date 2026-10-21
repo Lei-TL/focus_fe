@@ -86,11 +86,15 @@ export function formatSessionTimer(timing: SessionTiming): string {
 
 export function formatSessionStatus(status: SessionStatus): string {
   switch (status) {
+    case 'Active':
+      return 'Đang chạy';
     case 'Completed':
       return 'Hoàn thành';
     case 'Cancelled':
       return 'Đã hủy';
     default:
-      return 'Đang chạy';
+      // A status this build does not know must not be presented as a running
+      // session; say it is unknown instead of guessing.
+      return 'Không xác định';
   }
 }

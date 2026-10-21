@@ -1,8 +1,10 @@
 import { useEffect } from 'react';
 import { act, render } from '@testing-library/react-native';
-import { Text } from 'react-native';
+import { AppState, Text } from 'react-native';
 
 import {
+  SESSION_CURRENT_GONE_MESSAGE,
+  SESSION_CURRENT_MIN_INTERVAL_MS,
   SessionProvider,
   useSession,
   type SessionContextValue,
@@ -211,6 +213,117 @@ test('coalesces an in-flight check instead of calling current twice', async () =
   expect(captured?.state.kind).toBe('idle');
 });
 
+test('skips an unforced check inside the dedupe window and checks again after it', async () => {
+  currentMock.mockResolvedValue(null);
+
+  renderProvider();
+  await settle();
+  expect(currentMock).toHaveBeenCalledTimes(1);
+
+  // Same clock instant: the tab/mount checks are coalesced by the 5s window.
+  await act(async () => {
+    await captured?.checkCurrent();
+  });
+  await settle();
+  expect(currentMock).toHaveBeenCalledTimes(1);
+
+  await act(async () => {
+    await jest.advanceTimersByTimeAsync(SESSION_CURRENT_MIN_INTERVAL_MS + 1_000);
+  });
+  await act(async () => {
+    await captured?.checkCurrent();
+  });
+  await settle();
+  expect(currentMock).toHaveBeenCalledTimes(2);
+});
+
+test('samples the clock offset before waiting for the work item title', async () => {
+  currentMock.mockResolvedValue(currentSession);
+  // The title lookup is the slow part of a restore (up to the client timeout).
+  workItemDetailMock.mockImplementation(
+    () =>
+      new Promise((resolve) => {
+        setTimeout(() => resolve({ id: 'w1', title: 'Việc chính' }), 10_000);
+      })
+  );
+
+  renderProvider();
+  // `current` has answered at 02:00Z; the title is still pending.
+  await settle();
+
+  await act(async () => {
+    await jest.advanceTimersByTimeAsync(10_000);
+  });
+  await settle();
+
+  const restored = captured?.state;
+  // The offset was sampled when `current` answered (server 02:05Z, device 02:00Z).
+  // Sampling after the title await would give 290_000 and show a clock that is
+  // 10s behind real elapsed time.
+  expect(restored?.kind === 'active' ? restored.session.clockOffsetMs : null).toBe(300_000);
+  expect(restored?.kind === 'active' ? restored.session.workItemTitle : null).toBe('Việc chính');
+});
+
+test('keeps a running session and reports "not synced" when current answers 204', async () => {
+  startMock.mockResolvedValue(started);
+
+  renderProvider();
+  await settle();
+  await act(async () => {
+    await captured?.start(input);
+  });
+  expect(captured?.state.kind).toBe('active');
+
+  // Contradictory 204: the app is timing a session the server says it has not.
+  currentMock.mockResolvedValue(null);
+  await act(async () => {
+    await captured?.checkCurrent({ force: true });
+  });
+  await settle();
+
+  // Deliberate UX-safe choice: the clock is kept (no silent data loss) and the
+  // mismatch is reported; ending the session is the way to reconcile.
+  expect(captured?.state).toMatchObject({ kind: 'active', session: { sessionId: 's1' } });
+  expect(captured?.recovery).toEqual({
+    status: 'conflict',
+    message: SESSION_CURRENT_GONE_MESSAGE,
+  });
+});
+
+test('re-checks the current session when the app returns to the foreground', async () => {
+  // The preset's AppState.addEventListener is already a jest mock; spyOn over it
+  // would drop its default implementation on restore, so keep it explicitly.
+  const addEventListener = AppState.addEventListener as unknown as jest.Mock;
+  const defaultImplementation = addEventListener.getMockImplementation();
+  const appStateListeners: ((state: string) => void)[] = [];
+
+  addEventListener.mockImplementation((_event: string, handler: (state: string) => void) => {
+    appStateListeners.push(handler);
+    return { remove: jest.fn() };
+  });
+
+  try {
+    const view = renderProvider();
+    await settle();
+    expect(currentMock).toHaveBeenCalledTimes(1);
+
+    // Past the dedupe window, then the app comes back to the foreground.
+    await act(async () => {
+      await jest.advanceTimersByTimeAsync(SESSION_CURRENT_MIN_INTERVAL_MS + 5_000);
+    });
+    await act(async () => {
+      appStateListeners.forEach((handler) => handler('active'));
+    });
+    await settle();
+
+    expect(currentMock).toHaveBeenCalledTimes(2);
+
+    view.unmount();
+  } finally {
+    addEventListener.mockImplementation(defaultImplementation);
+  }
+});
+
 test('does not overwrite the session in memory when current returns the same id', async () => {
   startMock.mockResolvedValue(started);
 
@@ -237,6 +350,13 @@ test('does not overwrite the session in memory when current returns the same id'
   const refreshed = captured?.state;
   expect(refreshed?.kind === 'active' ? refreshed.session.clockOffsetMs : null).toBe(300_000);
   expect(captured?.recovery.status).toBe('idle');
+
+  // Refreshing the anchor keeps the same id, so the heartbeat publisher must not
+  // be rebuilt: 91s still yields exactly three ticks, not six.
+  await act(async () => {
+    await jest.advanceTimersByTimeAsync(91_000);
+  });
+  expect(recordMock).toHaveBeenCalledTimes(3);
 });
 
 test('reports a conflict when current returns a different session', async () => {
@@ -405,4 +525,37 @@ test('clears the known sessions when the user signs out', async () => {
   expect(captured?.state.kind).toBe('idle');
   expect(captured?.latestSessionByWorkItem).toEqual({});
   expect(captured?.recovery).toEqual({ status: 'idle', message: null });
+
+  // The heartbeat publisher is disposed with the provider, so nothing is sent
+  // for the previous user's session afterwards.
+  await act(async () => {
+    await jest.advanceTimersByTimeAsync(91_000);
+  });
+  expect(recordMock).not.toHaveBeenCalled();
+});
+
+test('aborts the pending current-session check when the user signs out', async () => {
+  let pendingSignal: AbortSignal | undefined;
+  currentMock.mockImplementation(
+    (signal?: AbortSignal) =>
+      new Promise(() => {
+        pendingSignal = signal;
+      })
+  );
+
+  const view = renderProvider();
+  await settle();
+  expect(pendingSignal?.aborted).toBe(false);
+
+  mockAuthStatus = 'signedOut';
+  view.rerender(
+    <SessionProvider>
+      <Probe />
+    </SessionProvider>
+  );
+  await settle();
+
+  expect(pendingSignal?.aborted).toBe(true);
+  // No retry is fired against the previous user's session.
+  expect(currentMock).toHaveBeenCalledTimes(1);
 });

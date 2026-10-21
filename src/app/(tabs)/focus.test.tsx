@@ -87,6 +87,7 @@ function sessionValue(overrides: Partial<SessionContextValue> = {}): SessionCont
     isEnding: false,
     events: eventsValue(),
     recovery: { status: 'idle', message: null },
+    checkedOnce: true,
     latestSessionByWorkItem: {},
     start: jest.fn(),
     end: jest.fn(),
@@ -188,7 +189,7 @@ describe('FocusScreen', () => {
     expect(screen.getAllByText(/điểm chất lượng/).length).toBeGreaterThan(0);
   });
 
-  test('offers to open the active session after a 409 start conflict', async () => {
+  test('opens the running session after a 409 start conflict', async () => {
     const start = jest.fn().mockRejectedValue(
       new SessionClientError({
         code: 'activeSessionExists',
@@ -196,13 +197,30 @@ describe('FocusScreen', () => {
         sessionId: 's1',
       })
     );
-    sessionValue({ start });
+    const resume = jest.fn().mockResolvedValue(undefined);
+    sessionValue({ start, resume });
 
-    render(<FocusScreen />);
+    const view = render(<FocusScreen />);
     fireEvent.press(screen.getByTestId('focus-item-w1'));
     fireEvent.press(screen.getByTestId('session-start'));
 
-    expect(await screen.findByTestId('session-open-active')).toBeTruthy();
+    const openActive = await screen.findByTestId('session-open-active');
+    await act(async () => {
+      fireEvent.press(openActive);
+    });
+
+    // The panel hands the server id to the provider; it must not start again.
+    expect(resume).toHaveBeenCalledWith('s1');
+    expect(start).toHaveBeenCalledTimes(1);
+
+    // Once the provider has that session, the tab shows the running clock
+    // instead of the start form.
+    sessionValue({ state: { kind: 'active', session: activeSession }, resume });
+    view.rerender(<FocusScreen />);
+
+    expect(screen.getByTestId('session-active-title')).toHaveTextContent('Học React Native');
+    expect(screen.getByTestId('session-timer')).toBeTruthy();
+    expect(screen.queryByTestId('session-open-active')).toBeNull();
   });
 
   test('refreshes the list when the tab is focused again', () => {
@@ -398,9 +416,37 @@ describe('FocusScreen', () => {
 
     expect(screen.getByTestId('session-overtime')).toHaveTextContent(/quá thời gian dự kiến/);
     expect(screen.getByTestId('session-overtime')).toHaveTextContent(/05:00/);
+    // The app does not promise the session runs forever: the backend worker can
+    // still close an abandoned session.
+    expect(screen.getByTestId('session-overtime')).toHaveTextContent(
+      /Ứng dụng không tự kết\s*thúc phiên; bạn có thể kết thúc khi sẵn sàng\./
+    );
     expect(screen.getByTestId('session-complete')).toBeTruthy();
     expect(mockSession.end).not.toHaveBeenCalled();
     nowSpy.mockRestore();
+  });
+
+  test('never auto-ends the session as the clock keeps ticking past the planned time', async () => {
+    jest.useFakeTimers();
+    try {
+      jest.setSystemTime(Date.parse('2026-10-20T01:20:00.000Z'));
+      sessionValue({ state: { kind: 'active', session: activeSession } });
+
+      render(<FocusScreen />);
+      expect(screen.getByTestId('session-overtime')).toHaveTextContent(/05:00/);
+
+      await act(async () => {
+        await jest.advanceTimersByTimeAsync(120_000);
+      });
+
+      // The timer kept running (overtime grew) and no end request was fired:
+      // ending stays a user decision.
+      expect(screen.getByTestId('session-overtime')).toHaveTextContent(/07:00/);
+      expect(mockSession.end).not.toHaveBeenCalled();
+      expect(screen.getByTestId('session-complete')).toBeTruthy();
+    } finally {
+      jest.useRealTimers();
+    }
   });
 
   test('re-checks the current session when the tab is focused', () => {
@@ -432,6 +478,35 @@ describe('FocusScreen', () => {
 
     fireEvent.press(screen.getByTestId('session-recovery-retry'));
     expect(checkCurrent).toHaveBeenCalledWith({ force: true });
+  });
+
+  test('shows the pending check instead of the work item picker on a cold start', () => {
+    sessionValue({
+      recovery: { status: 'checking', message: null },
+      checkedOnce: false,
+    });
+
+    render(<FocusScreen />);
+
+    expect(screen.getByTestId('session-checking-message')).toHaveTextContent(
+      /Đang kiểm tra phiên/
+    );
+    // Nothing is claimed about the session yet: no list, no start button.
+    expect(screen.queryByTestId('focus-item-w1')).toBeNull();
+    expect(screen.queryByTestId('session-start')).toBeNull();
+    expect(screen.queryByTestId('focus-items-empty')).toBeNull();
+  });
+
+  test('keeps the cached work item list while a later re-check runs', () => {
+    sessionValue({
+      recovery: { status: 'checking', message: null },
+      checkedOnce: true,
+    });
+
+    render(<FocusScreen />);
+
+    expect(screen.queryByTestId('session-checking-message')).toBeNull();
+    expect(screen.getByTestId('focus-item-w1')).toBeTruthy();
   });
 
   test('shows the server conflict without replacing the running session', () => {

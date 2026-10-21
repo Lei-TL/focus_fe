@@ -14,9 +14,12 @@ export type SessionMoment = {
   text: string;
   // Resolved IANA id, or "local" when the profile zone could not be used.
   timeZoneId: string;
-  // True only when the profile supplied a zone and Intl rejected it; the result
-  // screen must then say that device-local time is shown.
+  // True when device-local time was used because the profile supplied no usable
+  // zone (missing or unknown); the result screen must then say so.
   usedFallbackTimeZone: boolean;
+  // Why the fallback happened, so the screen can tell "the profile has no time
+  // zone" apart from "the profile time zone is invalid".
+  fallbackReason: 'missing' | 'invalid' | null;
 };
 
 const LOCALE = 'en-GB';
@@ -55,7 +58,8 @@ export function isValidTimeZone(timeZoneId: string | null | undefined): boolean 
 
 // Formats an ISO instant in the profile's time zone. An unknown/absent zone
 // falls back to device-local time instead of throwing, because a broken profile
-// value must never block showing a stored session.
+// value must never block showing a stored session. The returned
+// `fallbackReason` lets the UI explain which case happened.
 export function formatSessionMoment(
   iso: string | null | undefined,
   timeZoneId: string | null | undefined
@@ -70,6 +74,8 @@ export function formatSessionMoment(
 
   const preferred = typeof timeZoneId === 'string' ? timeZoneId.trim() : '';
   const usable = preferred.length > 0 && isValidTimeZone(preferred) ? preferred : null;
+  const fallbackReason: SessionMoment['fallbackReason'] =
+    usable !== null ? null : preferred.length > 0 ? 'invalid' : 'missing';
   const formatter = formatterFor(usable ?? undefined);
 
   let text: string;
@@ -87,7 +93,8 @@ export function formatSessionMoment(
   return {
     text,
     timeZoneId: usable ?? 'local',
-    usedFallbackTimeZone: preferred.length > 0 && usable === null,
+    usedFallbackTimeZone: fallbackReason !== null,
+    fallbackReason,
   };
 }
 

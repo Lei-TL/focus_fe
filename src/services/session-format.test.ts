@@ -35,10 +35,12 @@ describe('formatSessionMoment', () => {
       text: '20/10/2026 08:00',
       timeZoneId: 'Asia/Ho_Chi_Minh',
       usedFallbackTimeZone: false,
+      fallbackReason: null,
     });
     expect(formatSessionMoment(iso, 'UTC')).toMatchObject({
       text: '20/10/2026 01:00',
       usedFallbackTimeZone: false,
+      fallbackReason: null,
     });
   });
 
@@ -48,7 +50,21 @@ describe('formatSessionMoment', () => {
     expect(formatted).not.toBeNull();
     expect(formatted?.timeZoneId).toBe('local');
     expect(formatted?.usedFallbackTimeZone).toBe(true);
+    expect(formatted?.fallbackReason).toBe('invalid');
     expect(formatted?.text).toMatch(/^\d{2}\/\d{2}\/\d{4} \d{2}:\d{2}$/);
+  });
+
+  test('reports the fallback when the profile has no time zone at all', () => {
+    const blank = formatSessionMoment(iso, '');
+    const absent = formatSessionMoment(iso, undefined);
+
+    // A profile without a zone is a fallback too, but a different one: the UI
+    // must say "no time zone in the profile", not "invalid time zone".
+    for (const formatted of [blank, absent]) {
+      expect(formatted?.timeZoneId).toBe('local');
+      expect(formatted?.usedFallbackTimeZone).toBe(true);
+      expect(formatted?.fallbackReason).toBe('missing');
+    }
   });
 
   test('returns null for missing or unreadable timestamps', () => {

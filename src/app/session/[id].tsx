@@ -127,8 +127,9 @@ export default function SessionResultScreen() {
   const start = formatSessionMoment(detail.serverStartTime, profile?.timeZoneId);
   const end = formatSessionMoment(detail.serverEndTime, profile?.timeZoneId);
   const timeZoneId = start?.timeZoneId ?? end?.timeZoneId ?? 'local';
-  const usedFallbackTimeZone =
-    (start?.usedFallbackTimeZone ?? false) || (end?.usedFallbackTimeZone ?? false);
+  // A profile without a time zone is as much a fallback as a wrong one, but the
+  // user should be told which case it is.
+  const fallbackReason = start?.fallbackReason ?? end?.fallbackReason ?? null;
 
   return (
     <Screen eyebrow="Phiên làm việc" title="Kết quả phiên">
@@ -160,9 +161,11 @@ export default function SessionResultScreen() {
         <Text style={styles.muted} testID="session-detail-timezone">
           Múi giờ hiển thị: {timeZoneId}
         </Text>
-        {usedFallbackTimeZone ? (
+        {fallbackReason ? (
           <Text style={styles.warning} testID="session-detail-timezone-fallback">
-            Múi giờ trong hồ sơ không hợp lệ nên đang hiển thị giờ cục bộ của máy.
+            {fallbackReason === 'missing'
+              ? 'Hồ sơ chưa có múi giờ nên đang hiển thị giờ cục bộ của máy.'
+              : 'Múi giờ trong hồ sơ không hợp lệ nên đang hiển thị giờ cục bộ của máy.'}
           </Text>
         ) : null}
         <Text style={styles.muted}>

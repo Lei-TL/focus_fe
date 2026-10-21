@@ -3,10 +3,12 @@ import {
   computeSessionTiming,
   estimateClockOffset,
   formatDuration,
+  formatSessionStatus,
   formatSessionTimer,
   minutesToPlannedSeconds,
   sessionDurationOptions,
 } from '@/services/session-time';
+import type { SessionStatus } from '@/core/api/types';
 
 const SERVER_START = '2026-10-20T01:00:00.000Z';
 const START_MS = Date.parse(SERVER_START);
@@ -107,5 +109,18 @@ describe('formatDuration', () => {
 
     expect(formatSessionTimer(timing)).toBe('+01:05');
     expect(formatSessionTimer(computeSessionTiming(anchor, START_MS + 30_000))).toBe('00:30');
+  });
+});
+
+describe('formatSessionStatus', () => {
+  test('labels the known statuses', () => {
+    expect(formatSessionStatus('Active')).toBe('Đang chạy');
+    expect(formatSessionStatus('Completed')).toBe('Hoàn thành');
+    expect(formatSessionStatus('Cancelled')).toBe('Đã hủy');
+  });
+
+  test('does not present an unknown status as a running session', () => {
+    // A newer backend status must not be shown as "Đang chạy".
+    expect(formatSessionStatus('Paused' as SessionStatus)).toBe('Không xác định');
   });
 });

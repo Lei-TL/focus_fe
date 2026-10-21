@@ -71,7 +71,8 @@ export type SessionState =
 
 // `unavailable` means the check itself failed (offline/server down) and says
 // nothing about whether a session exists. `conflict` means the server answered
-// but disagrees with the session held in memory.
+// but disagrees with the session held in memory. `checking` means the answer is
+// still outstanding, so the app knows nothing yet.
 export type SessionRecovery = {
   status: 'idle' | 'checking' | 'unavailable' | 'conflict';
   message: string | null;
@@ -90,6 +91,11 @@ export type SessionContextValue = {
   // Heartbeat/AppState evidence for the active (or last) session.
   events: SessionEventsEvidence;
   recovery: SessionRecovery;
+  // True once at least one current-session check has finished in this provider
+  // run. While it is false, a `checking` recovery means the app genuinely does
+  // not know yet whether a session is running (cold start), so the focus screen
+  // must not offer the "pick a work item" flow as if there were no session.
+  checkedOnce: boolean;
   // Session ids the app has actually seen in this run, per work item. This is
   // not history: the backend has no GET /sessions list yet.
   latestSessionByWorkItem: Record<string, string>;
@@ -183,6 +189,7 @@ function SessionStateProvider({
   const [isStarting, setIsStarting] = useState(false);
   const [isEnding, setIsEnding] = useState(false);
   const [recovery, setRecovery] = useState<SessionRecovery>(IDLE_RECOVERY);
+  const [checkedOnce, setCheckedOnce] = useState(false);
   const [latestSessionByWorkItem, setLatestSessionByWorkItem] = useState<
     Record<string, string>
   >({});
@@ -428,7 +435,10 @@ function SessionStateProvider({
   );
 
   const applyCurrentSession = useCallback(
-    async (current: CurrentSession, signal: AbortSignal) => {
+    async (current: CurrentSession, clockOffsetMs: number, signal: AbortSignal) => {
+      // `clockOffsetMs` is sampled the moment the response lands (see
+      // checkCurrent), so the restored clock is not shifted by the work-item
+      // title lookup below.
       // Re-read the state after every await: a start/resume can commit while
       // the restore request is in flight and must win over the restore.
       const commit = (resolvedTitle: string | null) => {
@@ -455,7 +465,7 @@ function SessionStateProvider({
               ...latest.session,
               serverStartTime: current.serverStartTime,
               plannedSeconds: current.plannedSeconds,
-              clockOffsetMs: estimateClockOffset(current.serverNow, Date.now()),
+              clockOffsetMs,
             },
           });
           setRecovery(IDLE_RECOVERY);
@@ -474,7 +484,7 @@ function SessionStateProvider({
             // serverNow is the server clock when it answered; serverStartTime is
             // when the session began. Anchoring the offset on the former keeps a
             // restored clock on real elapsed time.
-            clockOffsetMs: estimateClockOffset(current.serverNow, Date.now()),
+            clockOffsetMs,
           },
         });
         setRecovery(IDLE_RECOVERY);
@@ -501,8 +511,14 @@ function SessionStateProvider({
   const applyNoCurrentSession = useCallback(() => {
     const existing = stateRef.current;
     if (existing.kind === 'active') {
-      // Do not silently drop a timed session on a contradictory 204; ending it
-      // will answer 404 and the normal end path resolves the real state.
+      // Deliberate UX-safety decision that deviates from "204 = no session"
+      // (spec §1). A 204 contradicting a session the user is actively timing is
+      // not proof that the session is gone: it can be a racy answer right after
+      // start, or another device closing the session server-side. Dropping the
+      // timer here would lose a running session; instead the clock is kept and
+      // the mismatch is surfaced as "not synced". Ending the session answers
+      // 404/409 and the normal end path resolves the real server state, so the
+      // user always has a way out and no data is lost.
       setRecovery({ status: 'conflict', message: SESSION_CURRENT_GONE_MESSAGE });
       return;
     }
@@ -537,7 +553,12 @@ function SessionStateProvider({
           }
           lastCheckRef.current = Date.now();
           if (current) {
-            await applyCurrentSession(current, controller.signal);
+            // Sample the offset the moment the answer lands, before any other
+            // await: resolving the work-item title can take up to the client
+            // timeout, and sampling afterwards would lag the restored clock by
+            // that wait until the next focus/foreground check.
+            const clockOffsetMs = estimateClockOffset(current.serverNow, Date.now());
+            await applyCurrentSession(current, clockOffsetMs, controller.signal);
           } else {
             applyNoCurrentSession();
           }
@@ -559,6 +580,11 @@ function SessionStateProvider({
         } finally {
           if (checkControllerRef.current === controller) {
             checkControllerRef.current = null;
+          }
+          // Any finished check (success, failure or abort before unmount) means
+          // the app is no longer in the "knows nothing yet" cold-start state.
+          if (mountedRef.current) {
+            setCheckedOnce(true);
           }
         }
       })();
@@ -670,6 +696,7 @@ function SessionStateProvider({
       isEnding,
       events,
       recovery,
+      checkedOnce,
       latestSessionByWorkItem,
       start,
       end,
@@ -683,6 +710,7 @@ function SessionStateProvider({
       isEnding,
       events,
       recovery,
+      checkedOnce,
       latestSessionByWorkItem,
       start,
       end,

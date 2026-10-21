@@ -35,7 +35,8 @@ import { colors, radius, spacing } from '@/theme/tokens';
 const FOCUS_FILTERS: WorkItemFilters = { status: 'Open', type: null };
 
 export default function FocusScreen() {
-  const { state, isEnding, end, dismissResult, events, recovery, checkCurrent } = useSession();
+  const { state, isEnding, end, dismissResult, events, recovery, checkedOnce, checkCurrent } =
+    useSession();
   const router = useRouter();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [endError, setEndError] = useState<string | null>(null);
@@ -264,6 +265,28 @@ export default function FocusScreen() {
     );
   }
 
+  // Until the first current-session check has answered, the app does not know
+  // whether a session is running. Showing the "pick a work item" flow here
+  // would read as "there is no session", so say that the check is running
+  // instead (a later re-check keeps the list, which is cached data, not a claim).
+  if (recovery.status === 'checking' && !checkedOnce) {
+    return (
+      <Screen eyebrow="Phiên tập trung" title="Đang kiểm tra phiên">
+        <Card>
+          <ActivityIndicator color={colors.primary} testID="session-checking-indicator" />
+          <Text style={styles.meta} testID="session-checking-message">
+            Đang kiểm tra phiên đang chạy…
+          </Text>
+          <Text style={styles.hint}>
+            Ứng dụng chưa biết bạn có phiên nào đang chạy hay không. Vui lòng đợi trong giây
+            lát.
+          </Text>
+        </Card>
+        <AppStateEvidence events={events} />
+      </Screen>
+    );
+  }
+
   const selectedItem = items.find((item) => item.id === selectedId) ?? null;
 
   return (
@@ -373,8 +396,8 @@ function SessionClock({ session }: { session: ActiveFocusSession }) {
       </Text>
       {timing.isOvertime ? (
         <Text style={styles.overtime} testID="session-overtime">
-          Đã quá thời gian dự kiến {formatDuration(timing.overtimeSeconds)}. Phiên không tự kết
-          thúc, bạn vẫn có thể kết thúc khi sẵn sàng.
+          Đã quá thời gian dự kiến {formatDuration(timing.overtimeSeconds)}. Ứng dụng không tự kết
+          thúc phiên; bạn có thể kết thúc khi sẵn sàng.
         </Text>
       ) : null}
     </>
