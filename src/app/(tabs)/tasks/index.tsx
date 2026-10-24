@@ -197,7 +197,13 @@ export default function TasksScreen() {
         ListFooterComponent={footer}
         contentContainerStyle={styles.content}
         refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor={colors.primary} />
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={() => {
+              void refresh();
+            }}
+            tintColor={colors.primary}
+          />
         }
         onEndReached={loadMore}
         onEndReachedThreshold={0.3}

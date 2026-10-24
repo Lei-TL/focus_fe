@@ -31,7 +31,9 @@
         {
           "configureAndroidBackup": true
         }
-      ]
+      ],
+      "expo-router",
+      "expo-status-bar"
     ]
   }
 }

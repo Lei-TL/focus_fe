@@ -10,6 +10,10 @@ import { getFocusSession } from '@/services/session-service';
 
 const SESSION_ID = '0f7a1e4c-4a3c-4c1b-9b2e-0f9f0d1c2b3a';
 
+// The first render in a cold worker can exceed Jest's 5s default budget on
+// Windows, so give this suite room without changing what it asserts.
+jest.setTimeout(15_000);
+
 let mockParams: { id?: string | string[] } = { id: SESSION_ID };
 let mockTimeZone = 'Asia/Ho_Chi_Minh';
 const mockBack = jest.fn();

@@ -41,15 +41,16 @@ function recordableState(state: AppStateStatus): RecordedAppState {
 // One stream per provider: the heartbeat interval, the flush timer and the
 // AppState listener all live here, not in a screen that can remount.
 export function useSessionEvents(sessionId: string | null): SessionEventsStream {
+  // React Native 0.88 types `AppState.currentState` as `string | null`, but at
+  // runtime it only carries `AppStateStatus` values.
+  const initialState = AppState.currentState as AppStateStatus;
   const [statsEntry, setStatsEntry] = useState<{
     sessionId: string;
     stats: SessionEventStats;
   } | null>(null);
-  const [appState, setAppState] = useState<AppStateStatus>(AppState.currentState);
+  const [appState, setAppState] = useState<AppStateStatus>(initialState);
   const publisherRef = useRef<SessionEventPublisher | null>(null);
-  const lastRecordedStateRef = useRef<RecordedAppState>(
-    recordableState(AppState.currentState)
-  );
+  const lastRecordedStateRef = useRef<RecordedAppState>(recordableState(initialState));
   const mountedRef = useRef(true);
 
   useEffect(() => {
